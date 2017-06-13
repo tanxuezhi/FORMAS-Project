@@ -53,14 +53,15 @@ ndvi.rts <- rts(ndvi, time.ndvi)
 
 ## compute annual mean NDVI and annual CV
 ndvi.annual.mean <- apply.yearly(ndvi.rts, mean)
-ndvi.annual.cv <- apply.yearly(ndvi.rts, function(x)sd(x, na.rm=TRUE) / mean(x, na.rm=TRUE))
+ndvi.annual.sd <- apply.yearly(ndvi.rts, function(x)sd(x, na.rm=TRUE))
 
 
 annual.cv.ndvi <- calc(ndvi.annual@raster, function(x)sd(x, na.rm=TRUE)) / calc(ndvi.annual@raster, function(x)mean(x, na.rm=TRUE))
 
 # optional: write or read data
+data.ToReadWrite <- "ndvi.annual.mean" # set data name
+
 dir.create(file.path(ndvi.Dir, "Processed_NDVI"), showWarnings = FALSE) # create dir
-data.ToReadWrite <- "ndvi.annual.mean"
 
 write.rts(get(data.ToReadWrite), paste0(ndvi.Dir,"/Processed_NDVI/", data.ToReadWrite), overwrite=T) # write rts
 assign(data.ToReadWrite, read.rts(paste0(ndvi.Dir,"/Processed_NDVI/", data.ToReadWrite))) # read rts
@@ -68,6 +69,8 @@ assign(data.ToReadWrite, read.rts(paste0(ndvi.Dir,"/Processed_NDVI/", data.ToRea
 
 
 ##### extract by site #####
+
+buffer_NL
 
 coords <- spTransform(coords, CRS("+init=epsg:4326"))
 sites[,2:3] <- coords@coords
