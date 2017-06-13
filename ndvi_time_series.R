@@ -1,54 +1,70 @@
 library(rts)
 library(raster)
-library(lme4)
-library(lmerTest)
-# library(qdapRegex)
-library(visreg)
-library(cowplot)
-
-setwd("c:/Local folder (c)/NDVI_NL/")
+# library(lme4)
+# library(lmerTest)
+library(qdapRegex)
+# library(visreg)
+# library(cowplot)
+library(rgeos)
+# library(rgdal)
 
 ##### create 1km buffers #####
-sites <- rio::import(file = "//storage.slu.se/Home$/yofo0001/My Documents/Recherche/FORMAS project/Data/Butterflies - Netherlands/Sites.xlsx", which = 1L)
+sites <- rio::import(file = "../Data/Butterflies - Netherlands/Sites.xlsx", which = 1L)
 sites[,2:3] <- sites[,2:3]*1000
 coords <- SpatialPoints(sites[,2:3], proj4string = CRS("+init=epsg:28992"))
 
-library(rgeos)
-library(rgdal)
 buffer_NL <- gBuffer(coords, byid = T, width = 1000)
 buffer_NL <- spTransform(buffer_NL, CRS("+init=epsg:4326"))
 
+## write polygons to shp file
 IDs <- sapply(slot(buffer_NL, "polygons"), function(x) slot(x, "ID"))
 df <- data.frame(rep(0, length(IDs)), row.names=IDs)
 SPDFxx <- SpatialPolygonsDataFrame(SPxx, df)
-
 writeOGR(obj=buffer_NL, dsn=getwd(), layer="buffer_NL", driver="ESRI Shapefile")
 
 
 ##### import ndvi time serie #####
 
-# urls <- read.table("nl-download-list.txt")[1:104,]
-# 
-# for (url in urls) {
-#   download.file(url, destfile = basename(url))
-# }
+## download files from url list (generated from AppEEARS) 
+url.List <- "../Data/NDVI/NDVI_NL/nl_250m_16days-download-list.txt"
 
-ndvi <- stack(list.files("c:/Local Folder (c)/NDVI_NL", pattern = ".tif", full.names = T))
+## !!! doesn't work !!! ##
+urls <- read.table(url.List)[1:209,]
+for (url in urls) {
+  download.file(url, destfile = basename(url))
+}
 
-time.ndvi <- read.table("nl_250m_16days-download-list.txt")
+##### process NDVI data #####
+
+## directory containing NDVI files
+ndvi.Dir <- "../Data/NDVI/NDVI_NL"
+
+## extract dates from download list
+time.ndvi <- read.table(url.List)
 time.ndvi <- apply(time.ndvi, 1, as.character)
-time.ndvi <- unlist(ex_between(time.ndvi, "NDVI_doy", "_aid0001"))[1:209]
+time.ndvi <- na.omit(unlist(ex_between(time.ndvi, "NDVI_doy", "_aid0001")))
 time.ndvi <- as.Date(time.ndvi, format = "%Y%d%m")
-# time.ndvi <- unique(time.ndvi)
 
+## stack ndvi
+ndvi <- stack(list.files(ndvi.Dir, pattern = ".tif", full.names = T))
+
+## create raster time series
 ndvi.rts <- rts(ndvi, time.ndvi)
 
-ndvi.annual <- apply.yearly(ndvi.rts, mean)
+## compute annual mean NDVI and annual CV
+ndvi.annual.mean <- apply.yearly(ndvi.rts, mean)
+ndvi.annual.cv <- apply.yearly(ndvi.rts, function(x)sd(x, na.rm=TRUE) / mean(x, na.rm=TRUE))
+
+
 annual.cv.ndvi <- calc(ndvi.annual@raster, function(x)sd(x, na.rm=TRUE)) / calc(ndvi.annual@raster, function(x)mean(x, na.rm=TRUE))
 
-annual.cv.ndvi2 <- annual.cv.ndvi
-annual.cv.ndvi2[annual.cv.ndvi2 < 0] <- 0
-annual.cv.ndvi2[annual.cv.ndvi2 > .6] <- .4
+# optional: write or read data
+dir.create(file.path(ndvi.Dir, "Processed_NDVI"), showWarnings = FALSE) # create dir
+data.ToReadWrite <- "ndvi.annual.mean"
+
+write.rts(get(data.ToReadWrite), paste0(ndvi.Dir,"/Processed_NDVI/", data.ToReadWrite), overwrite=T) # write rts
+assign(data.ToReadWrite, read.rts(paste0(ndvi.Dir,"/Processed_NDVI/", data.ToReadWrite))) # read rts
+
 
 
 ##### extract by site #####
