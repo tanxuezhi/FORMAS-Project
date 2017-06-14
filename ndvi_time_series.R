@@ -1,14 +1,9 @@
 library(rts)
 library(raster)
-# library(lme4)
-# library(lmerTest)
 library(qdapRegex)
-# library(visreg)
-# library(cowplot)
 library(rgeos)
-# library(rgdal)
 library(dplyr)
-
+library(rio)
 
 ##### create 1km buffers #####
 sites <- rio::import(file = "../Data/Butterflies - Netherlands/Sites.xlsx", which = 1L)
@@ -105,48 +100,4 @@ ndvi.buffers.sum <- ndvi.annual.buffers %>%
 
 plot(ndvi.buffers.sum$LT.CV_ndvi, ndvi.buffers.sum$CV.ST_ndvi) # show correlation btw. short-term and long-term measures
 
-
-##### analyses #####
-lc_class <- rio::import(file = "//storage.slu.se/Home$/yofo0001/My Documents/Recherche/FORMAS project/Landcover/Corine_land-cover_2012_raster/Legend/clc_legend.xls", which = 1L)
-
-
-cti_AB <- read.csv2("//storage.slu.se/Home$/yofo0001/My Documents/Recherche/FORMAS project/Data/Butterflies - Netherlands/cti_site_year_abundance_2017-05-19.csv", dec = "."); cti_AB$Site <- as.factor(cti_AB$Site)
-cti_AB <- merge(cti_AB, ndvi.site.final); cti_AB <- merge(cti_AB, sites); cti_AB$Landcover <- as.factor(cti_AB$Landcover)
-cti_AB <- merge(cti_AB, lc_class, by.x = "Landcover", by.y = "CLC_CODE")
-
-nb.year <- aggregate(cti ~ Site, cti_AB, length)
-
-cti_AB <- cti_AB[cti_AB$Site %in% nb.year[nb.year[,2] > 10,1],]
-
-cti_P <- read.csv2("//storage.slu.se/Home$/yofo0001/My Documents/Recherche/FORMAS project/Data/Butterflies - Netherlands/cti_site_year_presence_2017-05-19.csv", dec = "."); cti_P$Site <- as.factor(cti_P$Site)
-cti_P <- merge(cti_P, ndvi.site.final); cti_P <- merge(cti_P, sites); cti_P$Landcover <- as.factor(cti_P$Landcover)
-cti_P <- merge(cti_P, lc_class, by.x = "Landcover", by.y = "CLC_CODE")
-
-cti_P <- cti_P[cti_P$Site %in% nb.year[nb.year[,2] > 10,1],]
-
-
-m_ltv_AB <- lmer(cti ~ Year * long.term.variability + (1|LABEL2/Site), data = cti_AB)
-summary(m_ltv_AB)
-pred.m_ltv_AB <- visreg(m_ltv_AB, xvar = "Year", ylab = "CTI", scale = "response", 
-                        by = "long.term.variability", gg = T, breaks = 3, plot = F)
-
-p.ltv_AB <- ggplot(data = pred.m_ltv_AB$fit, aes(x = Year, y = visregFit, color = as.factor(long.term.variability))) + 
-  geom_line() + 
-  scale_y_continuous(name = "CTI", limits=c(8.95,9.3)) +
-  theme(legend.position = c(0.8,0.1)) + 
-  ggtitle("Abundance-weighted") + 
-  scale_color_manual(name = "NDVI variability", labels = c("Low", "Medium", "High"), values = c("royalblue1", "palegreen3", "tomato2")) 
-
-m_ltv_PO <- lmer(cti ~ Year * long.term.variability + (1|LABEL2/Site), data = cti_P)
-summary(m_ltv_PO)
-pred.m_ltv_PO <- visreg(m_ltv_PO, xvar = "Year", ylab = "CTI", scale = "response", 
-                        by = "long.term.variability", gg = T, breaks = 3, plot = F)
-
-p.ltv_PO <- ggplot(data = pred.m_ltv_PO$fit, aes(x = Year, y = visregFit, color = as.factor(long.term.variability))) + 
-  geom_line() + 
-  scale_y_continuous(name = "CTI", limits=c(8.95,9.3)) +
-  theme(legend.position = "none") + 
-  ggtitle("Presence-only") + 
-  scale_color_manual(name = "NDVI variability", labels = c("Low", "Medium", "High"), values = c("royalblue1", "palegreen3", "tomato2")) 
-
-plot_grid(p.ltv_AB, p.ltv_PO)
+write.csv(ndvi.buffers.sum, paste0(ndvi.Dir,"/ndvi.buffers.sum.scv"), row.names = F) # write result of NDVI extraction
