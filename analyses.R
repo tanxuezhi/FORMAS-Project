@@ -4,6 +4,7 @@ library(lmerTest)
 library(ggplot2)
 library(cowplot)
 library(visreg)
+library(MuMIn)
 
 ##### import CTI data and merge with site data #####
 
@@ -20,6 +21,8 @@ cti_AB_mean <- aggregate(cti ~ Year, cti_AB, mean)
 
 
 ##### try first preliminary analyses #####
+
+## cti change over time
 m_AB <- lmer(cti ~ Year + (1|LABEL2/Site), data = cti_AB)
 summary(m_AB)
 visreg(m_AB, xvar = "Year", ylab = "CTI", scale = "response", ylim = c(8.9,9.3))
@@ -27,15 +30,25 @@ points(cti ~ Year, cti_AB_mean, pch = 16, type = "b")
 
 
 ## effect of NDVI variability
-
-m_ltv_AB <- lmer(cti ~ Year * LT.CV_ndvi + (1|LABEL2/Site), data = cti_AB)
+# long-term variability
+m_ltv_AB <- lmer(cti ~ Year * sd.LT_ndvi + (1|LABEL2/Site), data = cti_AB)
 summary(m_ltv_AB)
 pred.m_ltv_AB <- visreg(m_ltv_AB, xvar = "Year", ylab = "CTI", scale = "response", 
-                        by = "LT.CV_ndvi", gg = T, breaks = 3, plot = F)
-
-p.ltv_AB <- ggplot(data = pred.m_ltv_AB$fit, aes(x = Year, y = visregFit, color = as.factor(LT.CV_ndvi))) + 
+                        by = "sd.LT_ndvi", gg = T, breaks = 3, plot = F)
+p.ltv_AB <- ggplot(data = pred.m_ltv_AB$fit, aes(x = Year, y = visregFit, color = as.factor(sd.LT_ndvi))) + 
   geom_line() + 
-  scale_y_continuous(name = "CTI", limits=c(8.95,9.3)) +
+  scale_y_continuous(name = "CTI") +
   theme(legend.position = c(0.8,0.1)) + 
-  ggtitle("Abundance-weighted") + 
+  scale_color_manual(name = "NDVI variability", labels = c("Low", "Medium", "High"), values = c("royalblue1", "palegreen3", "tomato2")) 
+
+
+# short-term variability
+m_stv_AB <- lmer(cti ~ Year * CV.ST_ndvi + (1|LABEL2/Site), data = cti_AB)
+summary(m_stv_AB)
+pred.m_ltv_AB <- visreg(m_stv_AB, xvar = "Year", ylab = "CTI", scale = "response", 
+                        by = "CV.ST_ndvi", gg = T, breaks = 3, plot = F)
+p.stv_AB <- ggplot(data = pred.m_ltv_AB$fit, aes(x = Year, y = visregFit, color = as.factor(CV.ST_ndvi))) + 
+  geom_line() + 
+  scale_y_continuous(name = "CTI") +
+  theme(legend.position = c(0.8,0.1)) + 
   scale_color_manual(name = "NDVI variability", labels = c("Low", "Medium", "High"), values = c("royalblue1", "palegreen3", "tomato2")) 

@@ -19,3 +19,20 @@ sti <- function(species, distri, temperature){
   }
   return(sti_list)
 }
+
+extractRTS <- function(rts, sites, fun, id.col){
+  res <- c()
+  for (i in 1:nlayers(rts@raster)){
+    if(is.data.frame(sites)){
+    site.name <- sites[,id.col]
+    }else{
+      site.name <- names(sites)
+    }
+    temp <- extract(rts[[i]], sites)
+    res <- rbind.data.frame(res,
+                            cbind.data.frame(Site = site.name, 
+                                             Year = as.numeric(ex_between(names(rts[[i]]), "X", ".")[[1]]), 
+                                             x = unlist(lapply(temp, fun))))
+  }
+  return(res)
+}

@@ -4,6 +4,10 @@ library(qdapRegex)
 library(rgeos)
 library(dplyr)
 library(rio)
+library(broom)
+
+# load functions
+source("functions.R")
 
 ##### create 1km buffers #####
 sites <- rio::import(file = "../Data/Butterflies - Netherlands/Sites.xlsx", which = 1L)
@@ -64,27 +68,30 @@ assign(data.ToReadWrite, read.rts(paste0(ndvi.Dir,"/Processed_NDVI/", data.ToRea
 ##### extract by site (here buffers) #####
 
 # extract annual mean values
-ndvi.annual.mean.buffers <- c()
-for (i in 1:nlayers(ndvi.annual.mean@raster)){
-  ndvi.annual.mean.buffers.temp <- extract(ndvi.annual.mean[[i]], buffer_NL)
-  ndvi.annual.mean.buffers <- rbind.data.frame(ndvi.annual.mean.buffers,
-                                               cbind.data.frame(Site = names(buffer_NL), 
-                                                                Year = ex_between(names(ndvi.annual.mean[[i]]), "X", ".")[[1]], 
-                                                                mean.ndvi = unlist(lapply(ndvi.annual.mean.buffers.temp, function(x)mean(x, na.rm=T)))))
-}
+ndvi.annual.mean.buffers <- extractRTS(ndvi.annual.mean, buffer_NL, function(x)mean(x, na.rm =T))
+ndvi.annual.sd.buffers <- extractRTS(ndvi.annual.mean, buffer_NL, function(x)sd(x, na.rm =T))
 
-# extract annual sd values
-ndvi.annual.sd.buffers <- c()
-for (i in 1:nlayers(ndvi.annual.sd@raster)){
-  ndvi.annual.sd.buffers.temp <- extract(ndvi.annual.sd[[i]], buffer_NL)
-  ndvi.annual.sd.buffers <- rbind.data.frame(ndvi.annual.sd.buffers,
-                                               cbind.data.frame(Site = names(buffer_NL), 
-                                                                Year = ex_between(names(ndvi.annual.sd[[i]]), "X", ".")[[1]], 
-                                                                sd.ndvi = unlist(lapply(ndvi.annual.sd.buffers.temp, function(x)sd(x, na.rm=T)))))
-}
-
-ndvi.annual.buffers <- cbind.data.frame(ndvi.annual.mean.buffers, sd.ndvi = ndvi.annual.sd.buffers[,3])
+ndvi.annual.buffers <- cbind.data.frame(ndvi.annual.mean.buffers[,1:2], 
+                                        mean.ndvi = ndvi.annual.mean.buffers[,3], 
+                                        sd.ndvi = ndvi.annual.sd.buffers[,3])
 ndvi.annual.buffers$cv.ndvi <- ndvi.annual.buffers$sd.ndvi / ndvi.annual.buffers$mean.ndvi
+ndvi.annual.buffers <- filter(ndvi.annual.buffers, Year < 2017)
+
+# detrend mean ndvi
+trends <- ndvi.annual.buffers %>% 
+  na.omit() %>%
+  group_by(Site) %>% 
+  do(trends = lm(mean.ndvi ~ Year, .))
+
+detrended.ndvi <- select(trends %>% augment(trends), Site, Year, .std.resid)
+
+ndvi.annual.buffers <- merge(ndvi.annual.buffers, detrended.ndvi)
+names(ndvi.annual.buffers)[6] <- "detrended.ndvi"
+
+ggplot(ndvi.annual.buffers, aes(x = Year, y = detrended.ndvi, color = Site)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", se = F) +
+  theme(legend.position = "none")
 
 # write data because of long computation time
 save(ndvi.annual.buffers, file = paste0(ndvi.Dir,"/ndvi.annual.buffers.RData"))
@@ -94,10 +101,10 @@ load(paste0(ndvi.Dir,"/ndvi.annual.buffers.RData")) # reload data
 # extract long-term and short-term CV
 ndvi.buffers.sum <- ndvi.annual.buffers %>% 
   group_by(Site) %>% 
-  summarise(LT.CV_ndvi = sd(mean.ndvi, na.rm=T)/mean(mean.ndvi, na.rm=T),
+  summarise(sd.LT_ndvi = sd(detrended.ndvi),
             mean_ndvi = mean(mean.ndvi, na.rm=T),
             CV.ST_ndvi = mean(cv.ndvi))
 
-plot(ndvi.buffers.sum$LT.CV_ndvi, ndvi.buffers.sum$CV.ST_ndvi) # show correlation btw. short-term and long-term measures
+plot(ndvi.buffers.sum$sd.LT_ndvi, ndvi.buffers.sum$CV.ST_ndvi) # show correlation btw. short-term and long-term measures
 
 write.csv(ndvi.buffers.sum, paste0(ndvi.Dir,"/ndvi.buffers.sum.scv"), row.names = F) # write result of NDVI extraction
