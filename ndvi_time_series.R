@@ -7,6 +7,8 @@ library(qdapRegex)
 # library(cowplot)
 library(rgeos)
 # library(rgdal)
+library(dplyr)
+
 
 ##### create 1km buffers #####
 sites <- rio::import(file = "../Data/Butterflies - Netherlands/Sites.xlsx", which = 1L)
@@ -55,9 +57,6 @@ ndvi.rts <- rts(ndvi, time.ndvi)
 ndvi.annual.mean <- apply.yearly(ndvi.rts, mean)
 ndvi.annual.sd <- apply.yearly(ndvi.rts, function(x)sd(x, na.rm=TRUE))
 
-
-annual.cv.ndvi <- calc(ndvi.annual@raster, function(x)sd(x, na.rm=TRUE)) / calc(ndvi.annual@raster, function(x)mean(x, na.rm=TRUE))
-
 # optional: write or read data
 data.ToReadWrite <- "ndvi.annual.mean" # set data name
 
@@ -67,44 +66,49 @@ write.rts(get(data.ToReadWrite), paste0(ndvi.Dir,"/Processed_NDVI/", data.ToRead
 assign(data.ToReadWrite, read.rts(paste0(ndvi.Dir,"/Processed_NDVI/", data.ToReadWrite))) # read rts
 
 
+##### extract by site (here buffers) #####
 
-##### extract by site #####
-
-buffer_NL
-
-coords <- spTransform(coords, CRS("+init=epsg:4326"))
-sites[,2:3] <- coords@coords
-
-
-ndvi.ts.pts <- extract(ndvi.rts, coords)
-
-ndvi.site = list()
-for (i in 1:ncol(ndvi.ts.pts)){
-  
-  temp <- ndvi.ts.pts[,i]
-  cv.temp <- apply.yearly(temp, function(x)sd(x, na.rm=TRUE)/mean(x, na.rm=TRUE))
-  mean.temp <- apply.yearly(temp, function(x)mean(x, na.rm =T))
-  
-  temp.res <- cbind.data.frame(Site = sites[i,1], 
-                               year = substr(rownames(data.frame(mean.temp)), 1,4), 
-                               mean.ndvi = mean.temp, 
-                               cv.ndvi = cv.temp)
-  row.names(temp.res) <- NULL
-  
-  ndvi.site[[i]] <- temp.res
+# extract annual mean values
+ndvi.annual.mean.buffers <- c()
+for (i in 1:nlayers(ndvi.annual.mean@raster)){
+  ndvi.annual.mean.buffers.temp <- extract(ndvi.annual.mean[[i]], buffer_NL)
+  ndvi.annual.mean.buffers <- rbind.data.frame(ndvi.annual.mean.buffers,
+                                               cbind.data.frame(Site = names(buffer_NL), 
+                                                                Year = ex_between(names(ndvi.annual.mean[[i]]), "X", ".")[[1]], 
+                                                                mean.ndvi = unlist(lapply(ndvi.annual.mean.buffers.temp, function(x)mean(x, na.rm=T)))))
 }
-ndvi.site = do.call(rbind, ndvi.site)
 
-ndvi.site.final <- aggregate(mean.ndvi ~ Site, ndvi.site, function(x)sd(x, na.rm=TRUE)/mean(x, na.rm=TRUE))
-ndvi.site.final$yearly.variability <- aggregate(cv.ndvi ~ Site, ndvi.site, function(x)mean(x, na.rm =T))[,2]
-colnames(ndvi.site.final) <- c("Site", "long.term.variability", "yearly.variability")
-ndvi.site.final$mean.ndvi <- na.omit(apply(ndvi.ts.pts,2,function(x)mean(x, na.rm =T)))
+# extract annual sd values
+ndvi.annual.sd.buffers <- c()
+for (i in 1:nlayers(ndvi.annual.sd@raster)){
+  ndvi.annual.sd.buffers.temp <- extract(ndvi.annual.sd[[i]], buffer_NL)
+  ndvi.annual.sd.buffers <- rbind.data.frame(ndvi.annual.sd.buffers,
+                                               cbind.data.frame(Site = names(buffer_NL), 
+                                                                Year = ex_between(names(ndvi.annual.sd[[i]]), "X", ".")[[1]], 
+                                                                sd.ndvi = unlist(lapply(ndvi.annual.sd.buffers.temp, function(x)sd(x, na.rm=T)))))
+}
 
+ndvi.annual.buffers <- cbind.data.frame(ndvi.annual.mean.buffers, sd.ndvi = ndvi.annual.sd.buffers[,3])
+ndvi.annual.buffers$cv.ndvi <- ndvi.annual.buffers$sd.ndvi / ndvi.annual.buffers$mean.ndvi
+
+# write data because of long computation time
+save(ndvi.annual.buffers, file = paste0(ndvi.Dir,"/ndvi.annual.buffers.RData"))
+load(paste0(ndvi.Dir,"/ndvi.annual.buffers.RData")) # reload data
+
+
+# extract long-term and short-term CV
+ndvi.buffers.sum <- ndvi.annual.buffers %>% 
+  group_by(Site) %>% 
+  summarise(LT.CV_ndvi = sd(mean.ndvi, na.rm=T)/mean(mean.ndvi, na.rm=T),
+            mean_ndvi = mean(mean.ndvi, na.rm=T),
+            CV.ST_ndvi = mean(cv.ndvi))
+
+plot(ndvi.buffers.sum$LT.CV_ndvi, ndvi.buffers.sum$CV.ST_ndvi) # show correlation btw. short-term and long-term measures
 
 
 ##### analyses #####
 lc_class <- rio::import(file = "//storage.slu.se/Home$/yofo0001/My Documents/Recherche/FORMAS project/Landcover/Corine_land-cover_2012_raster/Legend/clc_legend.xls", which = 1L)
-  
+
 
 cti_AB <- read.csv2("//storage.slu.se/Home$/yofo0001/My Documents/Recherche/FORMAS project/Data/Butterflies - Netherlands/cti_site_year_abundance_2017-05-19.csv", dec = "."); cti_AB$Site <- as.factor(cti_AB$Site)
 cti_AB <- merge(cti_AB, ndvi.site.final); cti_AB <- merge(cti_AB, sites); cti_AB$Landcover <- as.factor(cti_AB$Landcover)
@@ -124,7 +128,7 @@ cti_P <- cti_P[cti_P$Site %in% nb.year[nb.year[,2] > 10,1],]
 m_ltv_AB <- lmer(cti ~ Year * long.term.variability + (1|LABEL2/Site), data = cti_AB)
 summary(m_ltv_AB)
 pred.m_ltv_AB <- visreg(m_ltv_AB, xvar = "Year", ylab = "CTI", scale = "response", 
-       by = "long.term.variability", gg = T, breaks = 3, plot = F)
+                        by = "long.term.variability", gg = T, breaks = 3, plot = F)
 
 p.ltv_AB <- ggplot(data = pred.m_ltv_AB$fit, aes(x = Year, y = visregFit, color = as.factor(long.term.variability))) + 
   geom_line() + 
@@ -136,7 +140,7 @@ p.ltv_AB <- ggplot(data = pred.m_ltv_AB$fit, aes(x = Year, y = visregFit, color 
 m_ltv_PO <- lmer(cti ~ Year * long.term.variability + (1|LABEL2/Site), data = cti_P)
 summary(m_ltv_PO)
 pred.m_ltv_PO <- visreg(m_ltv_PO, xvar = "Year", ylab = "CTI", scale = "response", 
-       by = "long.term.variability", gg = T, breaks = 3, plot = F)
+                        by = "long.term.variability", gg = T, breaks = 3, plot = F)
 
 p.ltv_PO <- ggplot(data = pred.m_ltv_PO$fit, aes(x = Year, y = visregFit, color = as.factor(long.term.variability))) + 
   geom_line() + 
@@ -146,24 +150,3 @@ p.ltv_PO <- ggplot(data = pred.m_ltv_PO$fit, aes(x = Year, y = visregFit, color 
   scale_color_manual(name = "NDVI variability", labels = c("Low", "Medium", "High"), values = c("royalblue1", "palegreen3", "tomato2")) 
 
 plot_grid(p.ltv_AB, p.ltv_PO)
-
-
-library(effects)
-effect("long.term.variability", m_ltv_AB)
-
-#### test with yearly variability ####
-m_yv <- lmer(cti ~ Year * yearly.variability + (1|LABEL2/Site), data = cti_AB)
-summary(m_yv)
-visreg(m_yv, xvar = "Year", ylab = "CTI", scale = "response", ylim = c(8.9,9.3), 
-       by = "yearly.variability", gg = T, breaks = 3)
-
-
-
-##### test correlations #####
-library(HH)
-
-sit <- merge(sites, ndvi.site.final); sit <- merge(sit, lc_class, by.x = "Landcover", by.y = "CLC_CODE")
-
-
-vif(sit[,c("long.term.variability", "Landcover", "yearly.variability")])
-
