@@ -1,4 +1,5 @@
 library(rio)
+library(dplyr)
 library(lme4)
 library(lmerTest)
 library(ggplot2)
@@ -7,9 +8,8 @@ library(visreg)
 library(MuMIn)
 
 ##### import CTI data and merge with site data #####
-
 sites <- rio::import(file = "../Data/Butterflies - Netherlands/Sites.xlsx", which = 1L)
-ndvi_data <- read.csv(paste0("../Data/NDVI/NDVI_NL/ndvi.buffers.sum.scv"))
+ndvi_data <- read.csv(paste0("../Data/NDVI/NDVI_NL/ndvi.points.sum.scv"))
 lc_class <- rio::import(file = "../Landcover/clc_legend.xls", which = 1L)
 
 cti_AB <- read.csv2("../Data/Butterflies - Netherlands/cti_site_year_abundance_2017-05-19.csv", dec = ".")
@@ -30,25 +30,41 @@ points(cti ~ Year, cti_AB_mean, pch = 16, type = "b")
 
 
 ## effect of NDVI variability
+
+# test scale
+cti_AB <- subset(cti_AB, !cti_AB$Site %in% unique(subset(cti_AB, is.na(cti_AB$stSD.ndvi))$Site))
+
+m_ltv_AB <- list()
+for(i in unique(cti_AB$agreg.fac)){
+  m_ltv_AB[[i]] <- lmer(cti ~ Year * sd.ndvi + LABEL1 + (1|km10square/Site), data = filter(cti_AB, agreg.fac == i), na.action = na.fail)
+}
+m_ltv_AB <- unlist(m_ltv_AB)
+names(m_ltv_AB) <- paste("aggregation factor =", unique(cti_AB$agreg.fac))
+sel.scale <- model.sel(m_ltv_AB)
+
+
 # long-term variability
-m_ltv_AB <- lmer(cti ~ Year * sd.LT_ndvi + (1|LABEL2/Site), data = cti_AB)
+m_ltv_AB <- lmer(cti ~ Year * ltSD.ndvi + LABEL2 + (1|km10square/Site), data = cti_AB)
 summary(m_ltv_AB)
 pred.m_ltv_AB <- visreg(m_ltv_AB, xvar = "Year", ylab = "CTI", scale = "response", 
-                        by = "sd.LT_ndvi", gg = T, breaks = 3, plot = F)
-p.ltv_AB <- ggplot(data = pred.m_ltv_AB$fit, aes(x = Year, y = visregFit, color = as.factor(sd.LT_ndvi))) + 
+                        by = "ltSD.ndvi", gg = T, breaks = 3, plot = F)
+p.ltv_AB <- ggplot(data = pred.m_ltv_AB$fit, aes(x = Year, y = visregFit, color = as.factor(ltSD.ndvi))) + 
   geom_line() + 
   scale_y_continuous(name = "CTI") +
   theme(legend.position = c(0.8,0.1)) + 
-  scale_color_manual(name = "NDVI variability", labels = c("Low", "Medium", "High"), values = c("royalblue1", "palegreen3", "tomato2")) 
+  scale_color_manual(name = "Long-term NDVI variability", labels = c("Low", "Medium", "High"), values = c("royalblue1", "palegreen3", "tomato2")) 
 
 
 # short-term variability
-m_stv_AB <- lmer(cti ~ Year * CV.ST_ndvi + (1|LABEL2/Site), data = cti_AB)
+m_stv_AB <- lmer(cti ~ Year * stSD.ndvi + LABEL2 + (1|km10square/Site), data = cti_AB)
 summary(m_stv_AB)
 pred.m_ltv_AB <- visreg(m_stv_AB, xvar = "Year", ylab = "CTI", scale = "response", 
-                        by = "CV.ST_ndvi", gg = T, breaks = 3, plot = F)
-p.stv_AB <- ggplot(data = pred.m_ltv_AB$fit, aes(x = Year, y = visregFit, color = as.factor(CV.ST_ndvi))) + 
+                        by = "stSD.ndvi", gg = T, breaks = 3, plot = F)
+p.stv_AB <- ggplot(data = pred.m_ltv_AB$fit, aes(x = Year, y = visregFit, color = as.factor(stSD.ndvi))) + 
   geom_line() + 
   scale_y_continuous(name = "CTI") +
   theme(legend.position = c(0.8,0.1)) + 
-  scale_color_manual(name = "NDVI variability", labels = c("Low", "Medium", "High"), values = c("royalblue1", "palegreen3", "tomato2")) 
+  scale_color_manual(name = "Short-term NDVI variability", labels = c("Low", "Medium", "High"), values = c("royalblue1", "palegreen3", "tomato2")) 
+
+# plot
+plot_grid(p.ltv_AB, p.stv_AB, ncol = 2)

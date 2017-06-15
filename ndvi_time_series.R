@@ -52,7 +52,7 @@ ndvi <- stack(list.files(ndvi.Dir, pattern = ".tif", full.names = T))
 ## create raster time series
 ndvi.rts <- rts(ndvi, time.ndvi)
 
-## compute annual mean NDVI and annual CV
+## compute annual mean NDVI and annual sd
 ndvi.annual.mean <- apply.yearly(ndvi.rts, mean)
 ndvi.annual.sd <- apply.yearly(ndvi.rts, function(x)sd(x, na.rm=TRUE))
 
@@ -65,46 +65,46 @@ write.rts(get(data.ToReadWrite), paste0(ndvi.Dir,"/Processed_NDVI/", data.ToRead
 assign(data.ToReadWrite, read.rts(paste0(ndvi.Dir,"/Processed_NDVI/", data.ToReadWrite))) # read rts
 
 
-##### extract by site (here buffers) #####
+##### extract by site (points) #####
+# project points coordinates
+coords <- spTransform(coords, CRS("+init=epsg:4326"))
+sites[,2:3] <- coords@coords
 
-# extract annual mean values
-ndvi.annual.mean.buffers <- extractRTS(ndvi.annual.mean, buffer_NL, function(x)mean(x, na.rm =T))
-ndvi.annual.sd.buffers <- extractRTS(ndvi.annual.mean, buffer_NL, function(x)sd(x, na.rm =T))
+### test different aggregation factors ###
+# set aggregation factors
+agr.fac <- 2:20
 
-ndvi.annual.buffers <- cbind.data.frame(ndvi.annual.mean.buffers[,1:2], 
-                                        mean.ndvi = ndvi.annual.mean.buffers[,3], 
-                                        sd.ndvi = ndvi.annual.sd.buffers[,3])
-ndvi.annual.buffers$cv.ndvi <- ndvi.annual.buffers$sd.ndvi / ndvi.annual.buffers$mean.ndvi
-ndvi.annual.buffers <- filter(ndvi.annual.buffers, Year < 2017)
+ndvi.points.sum <- c()
+for(i in agr.fac){
+  # aggregate to specified factor
+  ndvi.annual.sd.agr <- aggregate(ndvi.annual.sd@raster, i)
+  # extract data and append it
+  ndvi.points.sum <- rbind.data.frame(ndvi.points.sum,
+                                      cbind.data.frame(Site = sites[,1], agreg.fac = i,
+                                                       sd.ndvi = apply(extract(ndvi.annual.sd.agr, sites[,2:3]), 1, 
+                                                                       function(x)mean(x, na.rm = T))))
+}
 
-# detrend mean ndvi
-trends <- ndvi.annual.buffers %>% 
-  na.omit() %>%
-  group_by(Site) %>% 
-  do(trends = lm(mean.ndvi ~ Year, .))
+### extract data ###
+# set aggregation factor
+agr.fac <- 1
 
-detrended.ndvi <- select(trends %>% augment(trends), Site, Year, .std.resid)
+if(agr.fac > 1){
+  ndvi.annual.sd.agr <- aggregate(ndvi.annual.sd@raster[[-nlayers(ndvi.annual.sd@raster)]], agr.fac)
+  ndvi.annual.mean.agr <- aggregate(ndvi.annual.mean@raster[[-nlayers(ndvi.annual.mean@raster)]], agr.fac)
+}else{
+  ndvi.annual.sd.agr <- ndvi.annual.sd@raster[[-nlayers(ndvi.annual.sd@raster)]]
+  ndvi.annual.mean.agr <- ndvi.annual.mean@raster[[-nlayers(ndvi.annual.mean@raster)]]
+}
 
-ndvi.annual.buffers <- merge(ndvi.annual.buffers, detrended.ndvi)
-names(ndvi.annual.buffers)[6] <- "detrended.ndvi"
-
-ggplot(ndvi.annual.buffers, aes(x = Year, y = detrended.ndvi, color = Site)) + 
-  geom_point() + 
-  geom_smooth(method = "lm", se = F) +
-  theme(legend.position = "none")
-
-# write data because of long computation time
-save(ndvi.annual.buffers, file = paste0(ndvi.Dir,"/ndvi.annual.buffers.RData"))
-load(paste0(ndvi.Dir,"/ndvi.annual.buffers.RData")) # reload data
+ndvi.points.sum <- cbind.data.frame(Site = sites[,1],
+                                    stSD.ndvi = apply(extract(ndvi.annual.sd.agr, sites[,2:3]), 1, 
+                                                      function(x)mean(x, na.rm = T)),
+                                    ltSD.ndvi = apply(extract(ndvi.annual.mean.agr, sites[,2:3]), 1, 
+                                                      function(x)sd(x, na.rm = T)),
+                                    mean.ndvi = apply(extract(ndvi.annual.mean.agr, sites[,2:3]), 1, 
+                                                      function(x)mean(x, na.rm = T)))
 
 
-# extract long-term and short-term CV
-ndvi.buffers.sum <- ndvi.annual.buffers %>% 
-  group_by(Site) %>% 
-  summarise(sd.LT_ndvi = sd(detrended.ndvi),
-            mean_ndvi = mean(mean.ndvi, na.rm=T),
-            CV.ST_ndvi = mean(cv.ndvi))
-
-plot(ndvi.buffers.sum$sd.LT_ndvi, ndvi.buffers.sum$CV.ST_ndvi) # show correlation btw. short-term and long-term measures
-
-write.csv(ndvi.buffers.sum, paste0(ndvi.Dir,"/ndvi.buffers.sum.scv"), row.names = F) # write result of NDVI extraction
+plot(ndvi.points.sum$mean.ndvi, ndvi.points.sum$stSD.ndvi) # show correlation btw. short-term and long-term measures
+write.csv(ndvi.points.sum, paste0(ndvi.Dir,"/ndvi.points.sum.scv"), row.names = F) # write result of NDVI extraction
