@@ -75,7 +75,8 @@ plot_grid(p.ltv_AB, p.stv_AB, ncol = 2)
 
 
 ##### Effect of connectivity #####
-m_frag_AB <- lmer(cti ~ Year * total.area + LABEL2 + (1|Site), data = stdize(cti_AB, prefix = F), na.action = na.fail)
+m_frag_AB <- lmer(cti ~ Year * patch.cohesion.index	
+ + LABEL2 + (1|Site), data = stdize(cti_AB, prefix = F), na.action = na.fail)
 summary(m_frag_AB)
 
 dredge(m_frag_AB, fixed = c("Year", "LABEL3"))

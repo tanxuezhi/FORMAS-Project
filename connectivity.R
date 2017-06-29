@@ -1,33 +1,45 @@
 # load libraries
 library(raster)
 library(SDMTools)
+library(rgdal)
 library(rgeos)
 
-#load sites
+###load sites
 sites <- read.csv(file = "../Data/Butterflies - Netherlands/Sites_ETRS89_landcover.csv")
 lc_class <- rio::import(file = "../Landcover/clc_legend.xls", which = 1L)
 sites <- merge(sites, lc_class, by.x = "Landcover", by.y = "CLC_CODE")
 
-#load landcover
+###load landcover
+
+#raster
 CLC_NL <- raster("//storage.slu.se/Home$/yofo0001/My Documents/Recherche/FORMAS project/Landcover/CLC_NL.tif")
 # reclassify by second-level categories
 reclassTable <- data.frame(from = lc_class[,1], to = as.numeric(as.factor(lc_class[,4])))
 CLC_NL_reclas <- reclassify(CLC_NL, reclassTable)
+#load roads
+roads <- readOGR("//storage.slu.se/Home$/yofo0001/My Documents/Recherche/FORMAS project/EGM_9-0SHP_20161017/DATA/Countries/NL/RoadL.shp")
+
+#shapefile
+CLC_NL <- readOGR("//storage.slu.se/Home$/yofo0001/My Documents/Recherche/FORMAS project/Landcover/CLC_2012_NL.shp")
 
 #landuse stats at monitoring sites
 table(sites$LABEL2)
 
-
 #select land-use category
 # Forest
-LC <- 23:25
+LC <- 311:313
 
-#reclass raster into habitat and non-habitat
-CLC_NL_sel <- CLC_NL
-CLC_NL_sel[CLC_NL_sel %in% LC] <- 1
-CLC_NL_sel[!CLC_NL_sel %in% 1] <- 0
+#set patches
+CLC_NL_sel <- CLC_NL[CLC_NL@data$code_12 %in% LC,]
 
-#create buffers
+# #reclass raster into habitat and non-habitat
+# CLC_NL_sel <- CLC_NL
+# CLC_NL_sel[CLC_NL_sel %in% LC] <- 1
+# CLC_NL_sel[!CLC_NL_sel %in% 1] <- 0
+
+dist_btw_patches <- gDistance(CLC_NL_sel, byid = )
+
+#extract
 pts <- sites[!sites$LABEL1 %in% "Artificial surfaces",]
 
 landFrag <- c()
