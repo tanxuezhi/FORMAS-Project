@@ -34,5 +34,3 @@ season <- c(1,2)
 
 #loop over species and calculate Species Temperature Index
 sti.list <- sti(species = species.names, distri = IUCN_distri, temperature = temperature.breeding)
-
-

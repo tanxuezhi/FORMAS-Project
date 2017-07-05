@@ -95,12 +95,12 @@ summary(m_frag_slope)
 visreg2d(m_frag_slope, xvar = "CA", yvar = "LSI", scale = "response")
 
 # response variable  = cti
-vif(cti_AB[,c("NLSI","PROX_MN","Year")])
+vif(cti_AB[,c("NLSI","CA","Year")])
 
 
 cti_AB$LABEL3 <- as.factor(cti_AB$LABEL3)
-m_frag <- lmer(cti ~ NLSI * PROX_MN * Year + LABEL3 + (1|Site), data = cti_AB, na.action = na.fail)
-m_frag_std <- lmer(cti ~ NLSI * PROX_MN * Year + LABEL3 + (1|Site), data = stdize(cti_AB, prefix = F), na.action = na.fail)
+m_frag <- lmer(cti ~ NLSI * CA * Year + LABEL3 + (1|Site), data = cti_AB, na.action = na.fail)
+m_frag_std <- lmer(cti ~ NLSI * CA * Year + LABEL3 + (1|Site), data = stdize(cti_AB, prefix = F), na.action = na.fail)
 anova(m_frag_std)
 summary(m_frag_std)
 
@@ -109,26 +109,85 @@ dredge(m_frag_std)
 m_frag_reduced <- lmer(cti ~ PROX_MN * Year + LABEL3 + (1|Site), data = cti_AB, na.action = na.fail)
 anova(m_frag_reduced)
 summary(m_frag_reduced)
-visreg(m_frag_reduced, xvar = "Year", by = "PROX_MN", scale = "response")
+visreg(m_frag_std, xvar = "Year", by = "LSI", scale = "response")
 
-
-PROX_MN_val <- seq(from = min(cti_AB$PROX_MN), to = max(cti_AB$PROX_MN), length.out = 20)
+# plot three-way interaction
+# 2d plots
+CA_val <- seq(from = min(cti_AB$CA), to = max(cti_AB$CA), length.out = 20)
 NLSI_val <- seq(from = min(cti_AB$NLSI), to = max(cti_AB$NLSI), length.out = 20)
 
 res <- c()
 n.max <- length(CA_val) * length(NLSI_val)
 n <- 0
-for(i in PROX_MN_val){
+for(i in CA_val){
   for (j in NLSI_val){
     n = n+1
-    cat(paste(round(n/n.max*100, 2), "%, parameters :", "PROX_MN =", round(i,2), ", LSI =", round(j,2), "\n"))
-    p <- visreg(m_frag, xvar = "Year", cond = list(PROX_MN = i, NLSI = j), plot = F)
+    cat(paste(round(n/n.max*100, 2), "%, parameters :", "CA =", round(i,2), ", nLSI =", round(j,2), "\n"))
+    p <- visreg(m_frag, xvar = "Year", cond = list(CA = i, NLSI = j), plot = F)
     slope <- coefficients(lm(visregFit ~ Year, data = p$fit))[2]
-    res <- bind_rows(res, tibble(PROX_MN = i, NLSI = j, slope = slope))
+    res <- bind_rows(res, tibble(CA = i, NLSI = j, slope = slope))
   }
 }
 
-quilt.plot(res,  nx = length(PROX_MN_val), ny = length(NLSI_val), xlab = "Proximity index", ylab = "Normalized Landscape Shape Index")
-points(NLSI ~ PROX_MN, data = cti_AB)
+quilt.plot(res,  nx = length(CA_val), ny = length(NLSI_val), 
+           xlab = "SNH Area", ylab = "Landscape Shape Index",
+           main = "Temporal trend of CTI")
+points(NLSI ~ CA, data = cti_AB)
 
+# grouped by classes (both factors)
+CA_val <- c(mean(cti_AB$CA)-sd(cti_AB$CA), mean(cti_AB$CA), mean(cti_AB$CA)+sd(cti_AB$CA))
+NLSI_val <- c(mean(cti_AB$NLSI)-sd(cti_AB$NLSI), mean(cti_AB$NLSI), mean(cti_AB$NLSI)+sd(cti_AB$NLSI))
+
+res_class <- c()
+for(i in CA_val){
+  for (j in NLSI_val){
+    p <- visreg(m_frag, xvar = "Year", cond = list(CA = i, NLSI = j), plot = F)
+    res_class <- bind_rows(res_class, p$fit)
+  }
+}
+
+# version 1
+CA_names <- c("Small","Medium","Large"); names(CA_names) <- CA_val
+NLSI_names <- c("Little fragmentated","Moderately fragmentated","Highly fragmentated"); names(NLSI_names) <- NLSI_val
+names_fac <- c(CA_names, NLSI_names)
+
+ggplot(data = res_class, aes(x = Year, y = visregFit)) + geom_line() + 
+  facet_grid(CA ~ NLSI, labeller = as_labeller(names_fac)) + 
+  geom_ribbon(aes(ymin=visregLwr, ymax=visregUpr), alpha=0.2) +
+  scale_y_continuous("Community temperature Index")
+
+
+# version 2
+col.CA <- c("dodgerblue", "gold2", "firebrick"); names(col.CA) <- CA_val
+
+ggplot(data = res_class, aes(x = Year, y = visregFit, color = as.factor(CA))) + geom_line() + 
+  facet_grid( ~ NLSI, labeller = as_labeller(NLSI_names)) + 
+  geom_ribbon(aes(ymin=visregLwr, ymax=visregUpr, fill = as.factor(CA)), alpha=0.1, colour=NA) +
+  scale_y_continuous("Community temperature Index") +
+  scale_color_manual("Area of SNH", labels = names_fac, values=col.CA) +
+  scale_fill_manual("Area of SNH", labels = names_fac, values=col.CA)
+
+
+
+# grouped by classes (not fragmentation)
+CA_val <- c(mean(cti_AB$CA)-sd(cti_AB$CA), mean(cti_AB$CA), mean(cti_AB$CA)+sd(cti_AB$CA))
+NLSI_val <- seq(from = min(cti_AB$NLSI), to = max(cti_AB$NLSI), length.out = 20)
+
+res_class_CA <- c()
+for(i in CA_val){
+  for (j in NLSI_val){
+    p <- visreg(m_frag, xvar = "Year", cond = list(CA = i, NLSI = j), plot = F)
+    slope <- coefficients(lm(visregFit ~ Year, data = p$fit))[2]
+    slopeLw <- coefficients(lm(visregLwr ~ Year, data = p$fit))[2]
+    slopeUp <- coefficients(lm(visregUpr ~ Year, data = p$fit))[2]
+    res_class_CA <- bind_rows(res_class_CA, tibble(CA = i, NLSI = j, slope = slope, slopeLw = slopeLw, slopeUp = slopeUp))
+  }
+}
+
+ggplot(data = res_class_CA, aes(x = NLSI, y = slope, color = as.factor(CA))) + geom_line() + 
+  geom_ribbon(aes(ymin=slopeLw, ymax=slopeUp, fill = as.factor(CA)), alpha=0.1, colour=NA) +
+  scale_y_continuous("Temporal trend of CTI") + 
+  scale_x_continuous("Fragmentation") + 
+  scale_color_manual("Area of SNH", labels = CA_names, values=col.CA)+
+  scale_fill_manual("Area of SNH", labels = CA_names, values=col.CA)
 
