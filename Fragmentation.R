@@ -3,17 +3,17 @@ library(rgeos)
 
 ###load landcover
 # reclassified by semi-natural habitat
-CLC_SNH_NL <- raster("//storage.slu.se/Home$/yofo0001/My Documents/Recherche/FORMAS project/Landcover/Netherlands/CLC_2012_100m_reclass_snh_NL.tif")
+CLC_SNH <- raster("//storage.slu.se/Home$/yofo0001/My Documents/Recherche/FORMAS project/Landcover/Finland/CLC_2012_100m_reclass_snh_FIN.tif")
 
 ###load sites
-sites <- read.csv(file = "../Data/Butterflies - Netherlands/Sites_ETRS89_landcover.csv")
+sites <- read.csv(file = "../Data/Butterflies - Finland/Sites_FIN_ETRS89_landcover.csv")
 
 ##### prepare Fragstat points #####
-pts_Fragstat <- cbind.data.frame(ID=sites[,1], row = rowFromY(CLC_NL_SNH, sites[,3]), col = colFromX(CLC_NL_SNH, sites[,2]))
+pts_Fragstat <- cbind.data.frame(ID=sites[,1], row = rowFromY(CLC_SNH, sites[,3]), col = colFromX(CLC_SNH, sites[,2]))
 data.frame(paste0("[",pts_Fragstat[,1],":",pts_Fragstat[,2],":",pts_Fragstat[,3],"]"))
 
 ##### load results #####
-frag <- read.table("../Connectivity/Fragmentation/NL/results_10000radius_3000connect.class", h=T,na.strings="N/A")
+frag <- read.table("../Connectivity/Fragmentation/FIN/results_FIN_10000radius_3000connect.class", h=T,na.strings="N/A")
 
 corrplot(abs(cor(frag[,-c(1,2,36)])), method=c("color"),  
          type="upper")
@@ -24,7 +24,7 @@ plot(frag[,c("NLSI","CA")])
 frag[,1] <- as.numeric(gsub("point_", "", frag[,1]))
 frag <- frag[,c("LID","NLSI","CA","PROX_MN", "LSI", "ED")]
 
-write.csv(frag, "../Connectivity/Fragmentation/NL/Frag_indices_NL.csv", row.names = F)
+write.csv(frag, "../Connectivity/Fragmentation/FIN/Frag_indices_NL.csv", row.names = F)
 
 
 

@@ -6,34 +6,48 @@ library(ggplot2)
 library(cowplot)
 library(visreg)
 library(MuMIn)
+library(HH)
+library(fields)
 
 ##### import CTI data and merge with site data #####
-#load sites
-sites <- read.csv(file = "../Data/Butterflies - Netherlands/Sites_ETRS89_landcover.csv")
+
+# sites data
+sites_NL <- read.csv(file = "../Data/Butterflies - Netherlands/Sites_NL_ETRS89_landcover.csv")
+sites_FIN <- read.csv(file = "../Data/Butterflies - Finland/Sites_FIN_ETRS89_landcover.csv")
+
 lc_class <- rio::import(file = "../Landcover/clc_legend.xls", which = 1L)
-sites <- merge(sites, lc_class, by.x = "Landcover", by.y = "CLC_CODE")
 
-# site data
-ndvi_data <- read.csv("../Data/NDVI/NDVI_NL/ndvi.points.sum.scv")
-frag_data <- read.csv("../Connectivity/Fragmentation/NL/Frag_indices_NL.csv")
+# ndvi_data <- read.csv("../Data/NDVI/NDVI_NL/ndvi.points.sum.scv")
+frag_data_NL <- read.csv("../Connectivity/Fragmentation/NL/Frag_indices_NL.csv")
+frag_data_FIN <- read.csv("../Connectivity/Fragmentation/FIN/Frag_indices_FIN.csv")
 
-sites <- merge(sites, frag_data, by.x = "Site", by.y = "LID")
+sites_NL <- merge(sites_NL, frag_data_NL, by.x = "Site", by.y = "LID")
+sites_NL <- merge(sites_NL, lc_class, by.x = "Landcover", by.y = "CLC_CODE")
+sites_NL <- sites_NL[,-which(names(sites_NL) %in% "GRID_CODE")]
 
+sites_FIN <- merge(sites_FIN, frag_data_FIN, by.x = "Site", by.y = "LID")
+sites_FIN <- merge(sites_FIN, lc_class, by.x = "Landcover", by.y = "GRID_CODE")
+sites_FIN <- sites_FIN[,-which(names(sites_FIN) %in% "CLC_CODE")]
 
-cti_AB <- read.csv2("../Data/Butterflies - Netherlands/cti_site_year_abundance_2017-05-19.csv", dec = ".")
-cti_AB$Site <- as.factor(cti_AB$Site)
-cti_AB <- merge(cti_AB, sites, by.x = "Site", by.y = "Site")
-cti_AB_mean <- aggregate(cti ~ Year, cti_AB, mean)
+# cti data
+cti_AB_NL <- read.csv2("../Data/Butterflies - Netherlands/cti_site_year_abundance_2017-05-19.csv", dec = ".")[,-3]
+cti_AB_NL <- merge(cti_AB_NL, sites_NL, by.x = "Site", by.y = "Site")
+cti_AB_NL_mean <- aggregate(cti ~ Year, cti_AB_NL, mean)
 
+cti_AB_FIN <- read.csv("../Data/Butterflies - Finland/CTI_Abundance_FINLAND_1999-2016.csv", dec = ".")
+cti_AB_FIN <- merge(cti_AB_FIN, sites_FIN, by.x = "Site", by.y = "Site")
+cti_AB_FIN_mean <- aggregate(cti ~ Year, cti_AB_FIN, mean)
+
+cti_AB <- rbind(cbind.data.frame(cti_AB_NL, country = "NL"), cbind.data.frame(cti_AB_FIN, country = "FIN"))
+cti_AB$Site <- paste0(cti_AB$Site, "_", cti_AB$country)
 
 ##### try first preliminary analyses #####
 
 ## cti change over time
-m_AB <- lmer(cti ~ Year + (1|LABEL3/Site), data = cti_AB)
+m_AB <- lmer(cti ~ Year*country + LABEL3 + (1|Site), data = cti_AB)
 summary(m_AB)
-visreg(m_AB, xvar = "Year", ylab = "CTI", scale = "response", ylim = c(8.9,9.3))
-points(cti ~ Year, cti_AB_mean, pch = 16, type = "b")
-
+anova(m_AB)
+visreg(m_AB, xvar = "Year", by = "country", ylab = "CTI", scale = "response")
 
 ## effect of NDVI variability
 
@@ -97,19 +111,20 @@ visreg2d(m_frag_slope, xvar = "CA", yvar = "LSI", scale = "response")
 # response variable  = cti
 vif(cti_AB[,c("NLSI","CA","Year")])
 
-
 cti_AB$LABEL3 <- as.factor(cti_AB$LABEL3)
-m_frag <- lmer(cti ~ NLSI * CA * Year + LABEL3 + (1|Site), data = cti_AB, na.action = na.fail)
-m_frag_std <- lmer(cti ~ NLSI * CA * Year + LABEL3 + (1|Site), data = stdize(cti_AB, prefix = F), na.action = na.fail)
+m_frag <- lmer(cti ~ NLSI * CA * Year + LABEL3 + country + (1|Site), data = cti_AB, na.action = na.fail)
+m_frag_std <- lmer(cti ~ NLSI * CA * Year + country + LABEL3 + (1|Site), data = stdize(cti_AB, prefix = F), na.action = na.fail)
 anova(m_frag_std)
 summary(m_frag_std)
 
-dredge(m_frag_std)
+ncf:::spline.correlog(cti_AB$X, cti_AB$Y, resid(m_frag_std, type  = "pearson"),
+                      resamp=100, na.rm = T)
 
-m_frag_reduced <- lmer(cti ~ PROX_MN * Year + LABEL3 + (1|Site), data = cti_AB, na.action = na.fail)
-anova(m_frag_reduced)
-summary(m_frag_reduced)
-visreg(m_frag_std, xvar = "Year", by = "LSI", scale = "response")
+dredge(m_frag_std, fixed = c("LABEL3","country","Year"))
+m_frag_reduced_std <- lmer(cti ~ NLSI * Year + CA * Year + LABEL3 + country + (1|Site), data = stdize(cti_AB, prefix = F), na.action = na.fail)
+anova(m_frag_reduced_std)
+summary(m_frag_reduced_std)
+
 
 # plot three-way interaction
 # 2d plots
@@ -132,7 +147,7 @@ for(i in CA_val){
 quilt.plot(res,  nx = length(CA_val), ny = length(NLSI_val), 
            xlab = "SNH Area", ylab = "Landscape Shape Index",
            main = "Temporal trend of CTI")
-points(NLSI ~ CA, data = cti_AB)
+points(NLSI ~ CA, data = cti_AB, col = country, pch = 16)
 
 # grouped by classes (both factors)
 CA_val <- c(mean(cti_AB$CA)-sd(cti_AB$CA), mean(cti_AB$CA), mean(cti_AB$CA)+sd(cti_AB$CA))

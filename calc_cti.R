@@ -36,7 +36,8 @@ write.csv(cti_AB, "../Data/Butterflies - Finland/CTI_Abundance_FINLAND_1999-2016
 write.csv(cti_PA, "../Data/Butterflies - Finland/CTI_Presence_FINLAND_1999-2016.csv", row.names = F)
 
 
-##### plot evolution of CTI #####
+##### plot trend of CTI #####
+
 par(mfrow=c(1,2))
 
 mean.cti.ab <- cti_AB %>% group_by(Year) %>% summarise(CTI = mean(cti))
