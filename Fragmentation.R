@@ -1,30 +1,59 @@
 library(corrplot)
+library(raster)
+library(sp)
+library(stringr)
 library(rgeos)
 
 ###load landcover
 # reclassified by semi-natural habitat
-CLC_SNH <- raster("//storage.slu.se/Home$/yofo0001/My Documents/Recherche/FORMAS project/Landcover/Finland/CLC_2012_100m_reclass_snh_FIN.tif")
+CLC_SNH <- raster("../Landcover/SNH/SNH_merged.tif")
 
-###load sites
-sites <- read.csv(file = "../Data/Butterflies - Finland/Sites_FIN_ETRS89_landcover.csv")
+###load sites and write cropped SNH rasters
+sites_FIN <- read.csv(file = "../Data/Butterflies - Finland/Sites_FIN_ETRS89_landcover.csv")
+sites_FIN <- SpatialPointsDataFrame(sites_FIN[,2:3], sites_FIN, proj4string = CRS("+init=epsg:3035"))
+CLC_SNH_FIN <- crop(CLC_SNH, extent(sites_FIN) + 100000)
+writeRaster(CLC_SNH_FIN, "../Landcover/Finland/SNH_Fin.tif")
+
+sites_NL <- read.csv(file = "../Data/Butterflies - Netherlands/Sites_NL_ETRS89_landcover.csv")
+sites_NL <- SpatialPointsDataFrame(sites_NL[,2:3], sites_NL, proj4string = CRS("+init=epsg:3035"))
+CLC_SNH_NL <- crop(CLC_SNH, extent(sites_NL) + 100000)
+writeRaster(CLC_SNH_NL, "../Landcover/Netherlands/SNH_NL.tif")
+
 
 ##### prepare Fragstat points #####
-pts_Fragstat <- cbind.data.frame(ID=sites[,1], row = rowFromY(CLC_SNH, sites[,3]), col = colFromX(CLC_SNH, sites[,2]))
-data.frame(paste0("[",pts_Fragstat[,1],":",pts_Fragstat[,2],":",pts_Fragstat[,3],"]"))
+pts_Fragstat_FIN <- cbind.data.frame(ID=sites_FIN@data$Site, row = rowFromY(CLC_SNH_FIN, sites_FIN@coords[,"Y"]), col = colFromX(CLC_SNH_FIN, sites_FIN@coords[,"X"]))
+pts_Fragstat_FIN <- data.frame(paste0("[",pts_Fragstat_FIN[,1],":",pts_Fragstat_FIN[,2],":",pts_Fragstat_FIN[,3],"]"))
+colnames(pts_Fragstat_FIN) <- "FPT_TABLE"
+write.table(pts_Fragstat_FIN, "../Connectivity/Fragmentation/FIN/FIN_sites.fpt", row.names = F, quote = F)
+
+pts_Fragstat_NL <- cbind.data.frame(ID=sites_NL@data$Site, row = rowFromY(CLC_SNH_NL, sites_NL@coords[,"Y"]), col = colFromX(CLC_SNH_NL, sites_NL@coords[,"X"]))
+pts_Fragstat_NL <- data.frame(paste0("[",pts_Fragstat_NL[,1],":",pts_Fragstat_NL[,2],":",pts_Fragstat_NL[,3],"]"))
+colnames(pts_Fragstat_NL) <- "FPT_TABLE"
+write.table(pts_Fragstat_NL, "../Connectivity/Fragmentation/NL/NL_sites.fpt", row.names = F, quote = F)
 
 ##### load results #####
-frag <- read.table("../Connectivity/Fragmentation/FIN/results_FIN_10000radius_3000connect.class", h=T,na.strings="N/A")
+folder <- "../Connectivity/Fragmentation/NL/"
+files_frag <- list.files(folder, pattern = ".class", full.names = T)
 
-corrplot(abs(cor(frag[,-c(1,2,36)])), method=c("color"),  
-         type="upper")
-plot(frag[,c("NLSI","CA","PROX_MN","CONNECT", "LSI")])
-plot(frag[,c("NLSI","CA")])
+frag_all_scales <- c()
+for(i in 1:length(files_frag)){
+  frag <- readLines(files_frag[i])
+  frag <- gsub(pattern = "N/A", replace = " ", x = frag)
+  writeLines(frag, con=files_frag[i])
+  
+  frag <- read.table(files_frag[i], h=T, sep = ",", dec=".")
+  frag[,1] <- as.numeric(gsub("point_", "", frag[,1]))
+  frag <- frag[,c("LID","NLSI","CA", "PLAND")]
+  
+  frag_all_scales <- rbind.data.frame(frag_all_scales, cbind.data.frame(Scale = str_sub(files_frag[i], -11, -7), frag))
+}
+frag_all_scales$Scale <- gsub("_","",frag_all_scales$Scale)
+write.csv(frag_all_scales, paste0(folder, "Frag_indices.csv"), row.names = F)
 
-
-frag[,1] <- as.numeric(gsub("point_", "", frag[,1]))
-frag <- frag[,c("LID","NLSI","CA","PROX_MN", "LSI", "ED")]
-
-write.csv(frag, "../Connectivity/Fragmentation/FIN/Frag_indices_NL.csv", row.names = F)
+# corrplot(abs(cor(frag[,-c(1,2,36)])), method=c("color"),  
+#          type="upper")
+# plot(frag[,c("NLSI","CA","PROX_MN","CONNECT", "LSI")])
+# plot(frag[,c("NLSI","CA")])
 
 
 
