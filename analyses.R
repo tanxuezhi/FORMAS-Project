@@ -18,8 +18,8 @@ sites_FIN <- read.csv(file = "../Data/Butterflies - Finland/Sites_FIN_ETRS89_lan
 lc_class <- rio::import(file = "../Landcover/clc_legend.xls", which = 1L)
 
 # ndvi_data <- read.csv("../Data/NDVI/NDVI_NL/ndvi.points.sum.scv")
-frag_data_NL <- read.csv("../Connectivity/Fragmentation/NL/Frag_indices_NL.csv")
-frag_data_FIN <- read.csv("../Connectivity/Fragmentation/FIN/Frag_indices_FIN.csv")
+frag_data_NL <- read.csv("../Connectivity/Fragmentation/NL/Frag_indices.csv")
+frag_data_FIN <- read.csv("../Connectivity/Fragmentation/FIN/Frag_indices.csv")
 
 sites_NL <- merge(sites_NL, frag_data_NL, by.x = "Site", by.y = "LID")
 sites_NL <- merge(sites_NL, lc_class, by.x = "Landcover", by.y = "CLC_CODE")
@@ -91,96 +91,87 @@ plot_grid(p.ltv_AB, p.stv_AB, ncol = 2)
 
 
 ##### Effect of fragmentation #####
-# response variable  = slope of cti ~ year
-slope_year_site <- c()
-for(i in unique(cti_AB$Site)){
-  m_slope_year <- lm(cti ~ Year, data = cti_AB[cti_AB$Site %in% i,])
-  slope <- cbind.data.frame(Site = i, slope = coefficients(m_slope_year)[2], nyears = dim(m_slope_year$model)[1])
-  rownames(slope) <- NULL
-  slope_year_site <- rbind.data.frame(slope_year_site, slope)
-}
-
-sites <- merge(sites, slope_year_site)
-
-m_frag_slope <- lm(slope ~ LSI * CA + LABEL3, weight =nyears, data = na.omit(sites[sites$nyears > 10,]), na.action = na.fail)
-anova(m_frag_slope)
-summary(m_frag_slope)
-
-visreg2d(m_frag_slope, xvar = "CA", yvar = "LSI", scale = "response")
-
 # response variable  = cti
-vif(cti_AB[,c("NLSI","CA","Year")])
-
+vif(cti_AB[,c("NLSI","PLAND","Year")])
 cti_AB$LABEL3 <- as.factor(cti_AB$LABEL3)
-m_frag <- lmer(cti ~ NLSI * CA * Year + LABEL3 + country + (1|Site), data = cti_AB, na.action = na.fail)
-m_frag_std <- lmer(cti ~ NLSI * CA * Year + country + LABEL3 + (1|Site), data = stdize(cti_AB, prefix = F), na.action = na.fail)
+cti_AB[is.na(cti_AB$NLSI),"NLSI"] <- 0
+
+# cti_AB <- subset(cti_AB, cti_AB$Scale > 2000)
+
+scaleTest <- c()
+for(i in unique(cti_AB$Scale)){
+  m_frag_std <- lmer(cti ~ NLSI * CA * Year + country + LABEL3 + (1|Site), data = stdize(subset(cti_AB, cti_AB$Scale == i), prefix = F))
+  scaleTest <- rbind.data.frame(scaleTest, cbind.data.frame(Scale = i, AICc = AICc(m_frag_std), coefInter = fixef(m_frag_std)["NLSI:CA:Year"]))
+}
+plot(scaleTest[order(scaleTest$Scale),], xlab = "Spatial scale (m)", ylab = "AICc", type = "o", pch = 16)
+plot(scaleTest[order(scaleTest$Scale),-2], xlab = "Spatial scale (m)", ylab = "coef", type = "o", pch = 16)
+
+
+cti_AB_sel <- cti_AB[cti_AB$Scale == scaleTest[order(scaleTest$AICc), "Scale"][1],]
+
+m_frag <- lmer(cti ~ NLSI * PLAND * Year + LABEL3 + country + (1|Site), data = cti_AB_sel, na.action = na.fail)
+m_frag_std <- lmer(cti ~ NLSI * CA * Year + country + LABEL3 + (1|Site), data = stdize(cti_AB_sel, prefix = F), na.action = na.fail)
 anova(m_frag_std)
 summary(m_frag_std)
 
 ncf:::spline.correlog(cti_AB$X, cti_AB$Y, resid(m_frag_std, type  = "pearson"),
                       resamp=100, na.rm = T)
 
-dredge(m_frag_std, fixed = c("LABEL3","country","Year"))
-m_frag_reduced_std <- lmer(cti ~ NLSI * Year + CA * Year + LABEL3 + country + (1|Site), data = stdize(cti_AB, prefix = F), na.action = na.fail)
-anova(m_frag_reduced_std)
-summary(m_frag_reduced_std)
-
-
 # plot three-way interaction
 # 2d plots
-CA_val <- seq(from = min(cti_AB$CA), to = max(cti_AB$CA), length.out = 20)
+PLAND_val <- seq(from = min(cti_AB$PLAND), to = max(cti_AB$PLAND), length.out = 20)
 NLSI_val <- seq(from = min(cti_AB$NLSI), to = max(cti_AB$NLSI), length.out = 20)
 
 res <- c()
 n.max <- length(CA_val) * length(NLSI_val)
 n <- 0
-for(i in CA_val){
+for(i in PLAND_val){
   for (j in NLSI_val){
     n = n+1
-    cat(paste(round(n/n.max*100, 2), "%, parameters :", "CA =", round(i,2), ", nLSI =", round(j,2), "\n"))
-    p <- visreg(m_frag, xvar = "Year", cond = list(CA = i, NLSI = j), plot = F)
+    cat(paste(round(n/n.max*100, 2), "%, parameters :", "PLAND =", round(i,2), ", nLSI =", round(j,2), "\n"))
+    p <- visreg(m_frag, xvar = "Year", cond = list(PLAND = i, NLSI = j), plot = F)
     slope <- coefficients(lm(visregFit ~ Year, data = p$fit))[2]
-    res <- bind_rows(res, tibble(CA = i, NLSI = j, slope = slope))
+    res <- bind_rows(res, tibble(PLAND = i/100, NLSI = j, slope = slope))
   }
 }
 
-quilt.plot(res,  nx = length(CA_val), ny = length(NLSI_val), 
+quilt.plot(res,  nx = length(PLAND_val), ny = length(NLSI_val), 
            xlab = "SNH Area", ylab = "Landscape Shape Index",
            main = "Temporal trend of CTI")
-points(NLSI ~ CA, data = cti_AB, col = country, pch = 16)
+points(NLSI ~ PLAND, data = cti_AB, pch = 16, col = country)
 
 # grouped by classes (both factors)
-CA_val <- c(mean(cti_AB$CA)-sd(cti_AB$CA), mean(cti_AB$CA), mean(cti_AB$CA)+sd(cti_AB$CA))
+PLAND_val <- c(mean(cti_AB$PLAND)-sd(cti_AB$PLAND), mean(cti_AB$PLAND), mean(cti_AB$PLAND)+sd(cti_AB$PLAND))
 NLSI_val <- c(mean(cti_AB$NLSI)-sd(cti_AB$NLSI), mean(cti_AB$NLSI), mean(cti_AB$NLSI)+sd(cti_AB$NLSI))
 
 res_class <- c()
-for(i in CA_val){
+for(i in PLAND_val){
   for (j in NLSI_val){
-    p <- visreg(m_frag, xvar = "Year", cond = list(CA = i, NLSI = j), plot = F)
+    p <- visreg(m_frag, xvar = "Year", cond = list(PLAND = i, NLSI = j), plot = F)
     res_class <- bind_rows(res_class, p$fit)
   }
 }
 
 # version 1
-CA_names <- c("Small","Medium","Large"); names(CA_names) <- CA_val
+PLAND_names <- c("Small","Medium","Large"); names(PLAND_names) <- PLAND_val
 NLSI_names <- c("Little fragmentated","Moderately fragmentated","Highly fragmentated"); names(NLSI_names) <- NLSI_val
-names_fac <- c(CA_names, NLSI_names)
+names_fac <- c(PLAND_names, NLSI_names)
 
 ggplot(data = res_class, aes(x = Year, y = visregFit)) + geom_line() + 
-  facet_grid(CA ~ NLSI, labeller = as_labeller(names_fac)) + 
+  facet_grid(PLAND ~ NLSI, labeller = as_labeller(names_fac)) + 
   geom_ribbon(aes(ymin=visregLwr, ymax=visregUpr), alpha=0.2) +
   scale_y_continuous("Community temperature Index")
 
 
 # version 2
-col.CA <- c("dodgerblue", "gold2", "firebrick"); names(col.CA) <- CA_val
+col.PLAND <- c("dodgerblue", "gold2", "firebrick"); names(col.PLAND) <- PLAND_val
 
-ggplot(data = res_class, aes(x = Year, y = visregFit, color = as.factor(CA))) + geom_line() + 
+ggplot(data = res_class, aes(x = Year, y = visregFit, color = as.factor(PLAND))) + geom_line() + 
   facet_grid( ~ NLSI, labeller = as_labeller(NLSI_names)) + 
-  geom_ribbon(aes(ymin=visregLwr, ymax=visregUpr, fill = as.factor(CA)), alpha=0.1, colour=NA) +
+  geom_ribbon(aes(ymin=visregLwr, ymax=visregUpr, fill = as.factor(PLAND)), alpha=0.1, colour=NA) +
   scale_y_continuous("Community temperature Index") +
-  scale_color_manual("Area of SNH", labels = names_fac, values=col.CA) +
-  scale_fill_manual("Area of SNH", labels = names_fac, values=col.CA)
+  scale_color_manual("Area of SNH", labels = names_fac, values=col.PLAND) +
+  scale_fill_manual("Area of SNH", labels = names_fac, values=col.PLAND)
 
 
 
