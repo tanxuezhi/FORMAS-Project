@@ -1,5 +1,9 @@
 library(dplyr)
 
+########################
+##### Butterflies ######
+########################
+
 ##### load STI data #####
 butterflies_sti <- rio::import(file = "//storage.slu.se/Home$/yofo0001/My Documents/Recherche/Pyrgus Armoricanus/Various documents/CLIMBER database/CLIMBER - Climatic niche characteristics of the butterflies in Europe.xlsx", which = 1L)
 butterflies_sti <- butterflies_sti[butterflies_sti$measurementType == "Temperature (STI)",c(1,4)]
@@ -50,3 +54,66 @@ plot(CTI~Year, mean.cti.pa, type = "o", pch = 16, main = "Presence only")
 abline(lm(CTI~Year, mean.cti.pa))
 summary(lm(CTI~Year, mean.cti.pa))
 
+
+
+########################
+######## Birds #########
+########################
+
+##### load STI data #####
+birds_sti <- read.csv("../BOTW/STI.csv")
+list.spSWE <- read.csv("../Data/Birds - Sweden/Species_list.csv")
+birds_sti <- merge(birds_sti, list.spSWE, by.x = "Species", by.y = "AltName")[,1:3]
+
+##### load count data #####
+countsSWE1 <- rio::import("../Data/Birds - Sweden/public_totalstandard_Ia.xlsx")
+countsSWE2 <- rio::import("../Data/Birds - Sweden/public_totalstandard_Ib.xlsx")
+countsSWE3 <- rio::import("../Data/Birds - Sweden/public_totalstandard_IIa.xlsx")
+countsSWE4 <- rio::import("../Data/Birds - Sweden/public_totalstandard_IIb.xlsx")
+
+countsSWE <- as.tbl(bind_rows(countsSWE1, countsSWE2, countsSWE3, countsSWE4))
+rm(list = c("countsSWE1", "countsSWE2", "countsSWE3", "countsSWE4"))
+countsSWE$art <- as.numeric(countsSWE$art)
+
+##### Extract STI #####
+countsSWE <- countsSWE %>% filter(art %in% 1:645)
+countsSWE <- countsSWE[,c(2,4,5,22,23)]
+
+par(mfrow=c(1,2))
+plot(countsSWE %>% group_by(Year = yr) %>% summarise('No. monitored sites' = length(unique(karta))))
+plot(countsSWE %>% group_by(Year = yr) %>% summarise("No. species detected" = length(unique(art))))
+
+# countsSWE.sel <- filter(countsSWE, karta == "02C2H")[,-c(6:21)]
+
+countsSWE_sum_year <- left_join(countsSWE, birds_sti, by = c("art" = "art") )
+
+countsSWE_sum_year %>% filter(is.na(STI))
+
+cti_AB_SWE <- countsSWE_sum_year %>% group_by(Year = yr, Site = karta) %>% summarise(cti = weighted.mean(STI, pkind + lind, na.rm = T))
+cti_PA_SWE <- countsSWE_sum_year %>% group_by(Year = yr, Site = karta) %>% summarise(cti = mean(STI, na.rm = T))
+
+##### Write CTI data #####
+write.csv(cti_AB_SWE, "../Data/Birds - Sweden/CTI_abundance_Sweden_1996-2016.csv", row.names = F)
+write.csv(cti_PA_SWE, "../Data/Birds - Sweden/CTI_presence_Sweden_1996-2016.csv", row.names = F)
+
+
+###### tests plots ######
+cti_change <- cti_AB_SWE %>%  group_by(Site) %>%  do(le_lin_fit(.))
+cti_change <- merge(cti_change, sites_SWE)
+
+library(gstat)
+library(raster)
+library(rgdal)
+CLC_SNH_SWE <- raster("../Landcover/Sweden/SNH_SWE.tif")
+CLC_SNH_SWE <- aggregate(CLC_SNH_SWE, 20)
+
+download.file(url = 'http://biogeo.ucdavis.edu/data/diva/adm/SWE_adm.zip', 
+              destfile = 'sweden.zip')
+unzip(zipfile = 'sweden.zip')
+sweden <- readOGR('SWE_adm0.shp')
+sweden <- spTransform(sweden, CRS("+init=epsg:3035"))
+
+mg <- gstat(id = "Site", formula = slope~1, locations = ~x+y, data=cti_change, nmax = 4)
+z <- interpolate(CLC_SNH_SWE, mg)
+z <- mask(z, sweden)
+spplot(z)

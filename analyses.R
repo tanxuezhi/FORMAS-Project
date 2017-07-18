@@ -8,16 +8,17 @@ library(visreg)
 library(MuMIn)
 library(HH)
 library(fields)
+source("functions.R")
 
 ##### import CTI data and merge with site data #####
+lc_class <- rio::import(file = "../Landcover/clc_legend.xls", which = 1L)
 
+### butterflies ###
 # sites data
 sites_NL <- read.csv(file = "../Data/Butterflies - Netherlands/Sites_NL_ETRS89_landcover.csv")
 sites_FIN <- read.csv(file = "../Data/Butterflies - Finland/Sites_FIN_ETRS89_landcover.csv")
 
-lc_class <- rio::import(file = "../Landcover/clc_legend.xls", which = 1L)
-
-# ndvi_data <- read.csv("../Data/NDVI/NDVI_NL/ndvi.points.sum.scv")
+# fragmentation data
 frag_data_NL <- read.csv("../Connectivity/Fragmentation/NL/Frag_indices.csv")
 frag_data_FIN <- read.csv("../Connectivity/Fragmentation/FIN/Frag_indices.csv")
 
@@ -30,24 +31,69 @@ sites_FIN <- merge(sites_FIN, lc_class, by.x = "Landcover", by.y = "GRID_CODE")
 sites_FIN <- sites_FIN[,-which(names(sites_FIN) %in% "CLC_CODE")]
 
 # cti data
+# Abundance-weighted #
 cti_AB_NL <- read.csv2("../Data/Butterflies - Netherlands/cti_site_year_abundance_2017-05-19.csv", dec = ".")[,-3]
 cti_AB_NL <- merge(cti_AB_NL, sites_NL, by.x = "Site", by.y = "Site")
-cti_AB_NL_mean <- aggregate(cti ~ Year, cti_AB_NL, mean)
 
 cti_AB_FIN <- read.csv("../Data/Butterflies - Finland/CTI_Abundance_FINLAND_1999-2016.csv", dec = ".")
 cti_AB_FIN <- merge(cti_AB_FIN, sites_FIN, by.x = "Site", by.y = "Site")
-cti_AB_FIN_mean <- aggregate(cti ~ Year, cti_AB_FIN, mean)
 
-cti_AB <- rbind(cbind.data.frame(cti_AB_NL, country = "NL"), cbind.data.frame(cti_AB_FIN, country = "FIN"))
-cti_AB$Site <- paste0(cti_AB$Site, "_", cti_AB$country)
+cti_AB_butterflies <- as.tbl(bind_rows(cbind.data.frame(cti_AB_NL, country = "NL"), cbind.data.frame(cti_AB_FIN, country = "FIN")))
+cti_AB_butterflies$Site <- paste0(cti_AB_butterflies$Site, "_", cti_AB_butterflies$country)
+
+# P/A #
+cti_PA_NL <- read.csv2("../Data/Butterflies - Netherlands/cti_site_year_presence_2017-05-19.csv", dec = ".")[,-3]
+cti_PA_NL <- merge(cti_PA_NL, sites_NL, by.x = "Site", by.y = "Site")
+
+cti_PA_FIN <- read.csv("../Data/Butterflies - Finland/CTI_presence_FINLAND_1999-2016.csv", dec = ".")
+cti_PA_FIN <- merge(cti_PA_FIN, sites_FIN, by.x = "Site", by.y = "Site")
+
+cti_PA_butterflies <- as.tbl(bind_rows(cbind.data.frame(cti_PA_NL, country = "NL"), cbind.data.frame(cti_PA_FIN, country = "FIN")))
+cti_PA_butterflies$Site <- paste0(cti_PA_butterflies$Site, "_", cti_PA_butterflies$country)
+
+
+### birds ###
+# sites data
+sites_SWE <- read.csv(file = "../Data/Birds - Sweden/Sites_SWE_ETRS89_landcover.csv")
+
+# fragmentation data
+frag_data_SWE <- read.csv("../Connectivity/Fragmentation/SWE/Frag_indices.csv")
+
+sites_SWE <- merge(sites_SWE, frag_data_SWE, by.x = "Site", by.y = "LID")
+sites_SWE <- merge(sites_SWE, lc_class, by.x = "Landcover", by.y = "GRID_CODE")
+
+# cti data
+# Abundance-weighted #
+cti_AB_SWE <- read.csv("../Data/Birds - Sweden/CTI_abundance_Sweden_1996-2016.csv", dec = ".")
+cti_AB_SWE <- as.tbl(inner_join(cti_AB_SWE, sites_SWE, by = "Site"))
+
+# P/A #
+cti_PA_SWE <- read.csv("../Data/Birds - Sweden/CTI_presence_Sweden_1996-2016.csv", dec = ".")
+cti_PA_SWE <- as.tbl(inner_join(cti_PA_SWE, sites_SWE, by = "Site"))
+
 
 ##### try first preliminary analyses #####
 
 ## cti change over time
-m_AB <- lmer(cti ~ Year*country + LABEL3 + (1|Site), data = cti_AB)
-summary(m_AB)
-anova(m_AB)
-visreg(m_AB, xvar = "Year", by = "country", ylab = "CTI", scale = "response")
+par(mfrow=c(1,2))
+
+cti_AB_SWE$Year <- as.factor(cti_AB_SWE$Year)
+m1 <- lmer(cti ~ Year + (1|Site), data = cti_AB_SWE)
+ctiYear_lsmeans <- lsmeansLT(m1, test.effs = "Year")
+ctiYear_lsmeans$lsmeans.table$Year <- as.vector(ctiYear_lsmeans$lsmeans.table$Year)
+plot(Estimate ~ Year, ctiYear_lsmeans$lsmeans.table, type = "o", pch = 16, main = "Birds - Sweden", ylab = "CTI")
+
+cti_AB_butterflies$Year <- as.factor(cti_AB_butterflies$Year)
+m2 <- lmer(cti ~ Year + (1|Site), data = subset(cti_AB_butterflies, cti_AB_butterflies$country == "NL"))
+ctiYear_lsmeans <- lsmeansLT(m2, test.effs = c("Year"))
+ctiYear_lsmeans$lsmeans.table$Year <- as.vector(ctiYear_lsmeans$lsmeans.table$Year)
+plot(Estimate ~ Year, ctiYear_lsmeans$lsmeans.table, type = "o", pch = 16, main = "Butterflies - NL & FIN", ylab = "CTI", ylim = c(7.9,9.25), col = "blue")
+
+m3 <- lmer(cti ~ Year + (1|Site), data = subset(cti_AB_butterflies, cti_AB_butterflies$country == "FIN"))
+ctiYear_lsmeans <- lsmeansLT(m3, test.effs = c("Year"))
+ctiYear_lsmeans$lsmeans.table$Year <- as.vector(ctiYear_lsmeans$lsmeans.table$Year)
+points(Estimate ~ Year, ctiYear_lsmeans$lsmeans.table, type = "o", pch = 16, col = "red")
+
 
 ## effect of NDVI variability
 
@@ -92,73 +138,64 @@ plot_grid(p.ltv_AB, p.stv_AB, ncol = 2)
 
 ##### Effect of fragmentation #####
 # response variable  = cti
-vif(cti_AB[,c("NLSI","PLAND","Year")])
-cti_AB$LABEL3 <- as.factor(cti_AB$LABEL3)
-cti_AB[is.na(cti_AB$NLSI),"NLSI"] <- 0
+vif(data.frame(cti_AB_butterflies[,c("LSI","PLAND","Year")]))
+vif(data.frame(cti_AB_SWE[,c("LSI","PLAND","Year")]))
 
-# cti_AB <- subset(cti_AB, cti_AB$Scale > 2000)
+cti_AB_butterflies$LABEL3 <- as.factor(cti_AB_butterflies$LABEL3)
+cti_AB_SWE$LABEL3 <- as.factor(cti_AB_SWE$LABEL3)
 
-scaleTest <- c()
-for(i in unique(cti_AB$Scale)){
-  m_frag_std <- lmer(cti ~ NLSI * CA * Year + country + LABEL3 + (1|Site), data = stdize(subset(cti_AB, cti_AB$Scale == i), prefix = F))
-  scaleTest <- rbind.data.frame(scaleTest, cbind.data.frame(Scale = i, AICc = AICc(m_frag_std), coefInter = fixef(m_frag_std)["NLSI:CA:Year"]))
-}
-plot(scaleTest[order(scaleTest$Scale),], xlab = "Spatial scale (m)", ylab = "AICc", type = "o", pch = 16)
-plot(scaleTest[order(scaleTest$Scale),-2], xlab = "Spatial scale (m)", ylab = "coef", type = "o", pch = 16)
+cti_AB_butterflies %>% group_by(Scale) %>% summarise(n = length(Site))
+cti_AB_SWE %>% group_by(Scale) %>% summarise(n = length(Site))
 
+cti_AB_butterflies <- cti_AB_butterflies %>% filter(Scale > 2000)
+cti_AB_SWE <- cti_AB_SWE %>% filter(Scale >= 3000)
 
-cti_AB_sel <- cti_AB[cti_AB$Scale == scaleTest[order(scaleTest$AICc), "Scale"][1],]
+par(mfrow=c(1,2))
+scaleFrag_butterflies <- scaleTest(cti_AB_butterflies)
+scaleFrag_birds <- scaleTest(cti_AB_SWE)
 
-m_frag <- lmer(cti ~ NLSI * PLAND * Year + LABEL3 + country + (1|Site), data = cti_AB_sel, na.action = na.fail)
-m_frag_std <- lmer(cti ~ NLSI * CA * Year + country + LABEL3 + (1|Site), data = stdize(cti_AB_sel, prefix = F), na.action = na.fail)
-anova(m_frag_std)
-summary(m_frag_std)
+cti_AB_butterflies_sel <- cti_AB_butterflies[cti_AB_butterflies$Scale == scaleFrag_butterflies[scaleFrag_butterflies$AICc == min(scaleFrag_butterflies$AICc),1],]
+cti_AB_SWE_sel <- cti_AB_SWE[cti_AB_SWE$Scale == scaleFrag_birds[scaleFrag_birds$AICc == min(scaleFrag_birds$AICc),1],]
+
+m_frag_butterflies <- lmer(cti ~ CLUMPY * PLAND * Year + X*Y + (1|country/Site), data = cti_AB_butterflies_sel, na.action = na.fail)
+m_frag_butterflies_std <- lmer(cti ~ CLUMPY * PLAND * Year + X*Y + (1|country/Site), data = stdize(cti_AB_butterflies_sel, prefix = F), na.action = na.fail)
+anova(m_frag_butterflies_std)
+summary(m_frag_butterflies_std)
+sjp.lmer(m_frag_butterflies_std, type = "fe")
+
+m_frag_SWE <- lmer(cti ~ LSI * PLAND * Year + LABEL3 + X*Y + (1|Site), data = cti_AB_SWE_sel, na.action = na.fail)
+m_frag_SWE_std <- lmer(cti ~ LSI * PLAND * Year + X*Y + LABEL3 + (1|Site), data = stdize(cti_AB_butterflies_sel, prefix = F), na.action = na.fail)
+anova(m_frag_SWE_std)
+summary(m_frag_SWE_std)
+
 
 ncf:::spline.correlog(cti_AB$X, cti_AB$Y, resid(m_frag_std, type  = "pearson"),
                       resamp=100, na.rm = T)
 
 # plot three-way interaction
 # 2d plots
-PLAND_val <- seq(from = min(cti_AB$PLAND), to = max(cti_AB$PLAND), length.out = 20)
-NLSI_val <- seq(from = min(cti_AB$NLSI), to = max(cti_AB$NLSI), length.out = 20)
 
-res <- c()
-n.max <- length(CA_val) * length(NLSI_val)
-n <- 0
-for(i in PLAND_val){
-  for (j in NLSI_val){
-    n = n+1
-    cat(paste(round(n/n.max*100, 2), "%, parameters :", "PLAND =", round(i,2), ", nLSI =", round(j,2), "\n"))
-    p <- visreg(m_frag, xvar = "Year", cond = list(PLAND = i, NLSI = j), plot = F)
-    slope <- coefficients(lm(visregFit ~ Year, data = p$fit))[2]
-    res <- bind_rows(res, tibble(PLAND = i/100, NLSI = j, slope = slope))
-  }
-}
-
-quilt.plot(res,  nx = length(PLAND_val), ny = length(NLSI_val), 
-           xlab = "SNH Area", ylab = "Landscape Shape Index",
-           main = "Temporal trend of CTI")
-points(NLSI ~ PLAND, data = cti_AB, pch = 16, col = country)
+a <- vis.2d(m_frag_butterflies_std, "Year", "CLUMPY", "PLAND", n = 50)
 
 # grouped by classes (both factors)
-PLAND_val <- c(mean(cti_AB$PLAND)-sd(cti_AB$PLAND), mean(cti_AB$PLAND), mean(cti_AB$PLAND)+sd(cti_AB$PLAND))
-NLSI_val <- c(mean(cti_AB$NLSI)-sd(cti_AB$NLSI), mean(cti_AB$NLSI), mean(cti_AB$NLSI)+sd(cti_AB$NLSI))
+PLAND_val <- c(mean(cti_AB_butterflies_sel$PLAND)-sd(cti_AB_butterflies_sel$PLAND), mean(cti_AB_butterflies_sel$PLAND), mean(cti_AB_butterflies_sel$PLAND)+sd(cti_AB_butterflies_sel$PLAND))
+LSI_val <- c(mean(cti_AB_butterflies_sel$CLUMPY)-sd(cti_AB_butterflies_sel$CLUMPY), mean(cti_AB_butterflies_sel$CLUMPY), mean(cti_AB_butterflies_sel$CLUMPY)+sd(cti_AB_butterflies_sel$CLUMPY))
 
 res_class <- c()
 for(i in PLAND_val){
-  for (j in NLSI_val){
-    p <- visreg(m_frag, xvar = "Year", cond = list(PLAND = i, NLSI = j), plot = F)
+  for (j in LSI_val){
+    p <- visreg(m_frag_butterflies, xvar = "Year", cond = list(PLAND = i, CLUMPY = j), plot = F)
     res_class <- bind_rows(res_class, p$fit)
   }
 }
 
 # version 1
 PLAND_names <- c("Small","Medium","Large"); names(PLAND_names) <- PLAND_val
-NLSI_names <- c("Little fragmentated","Moderately fragmentated","Highly fragmentated"); names(NLSI_names) <- NLSI_val
-names_fac <- c(PLAND_names, NLSI_names)
+LSI_names <- c("Little fragmentated","Moderately fragmentated","Highly fragmentated"); names(LSI_names) <- LSI_val
+names_fac <- c(PLAND_names, LSI_names)
 
 ggplot(data = res_class, aes(x = Year, y = visregFit)) + geom_line() + 
-  facet_grid(PLAND ~ NLSI, labeller = as_labeller(names_fac)) + 
+  facet_grid(PLAND ~ CLUMPY, labeller = as_labeller(names_fac)) + 
   geom_ribbon(aes(ymin=visregLwr, ymax=visregUpr), alpha=0.2) +
   scale_y_continuous("Community temperature Index")
 
@@ -167,33 +204,32 @@ ggplot(data = res_class, aes(x = Year, y = visregFit)) + geom_line() +
 col.PLAND <- c("dodgerblue", "gold2", "firebrick"); names(col.PLAND) <- PLAND_val
 
 ggplot(data = res_class, aes(x = Year, y = visregFit, color = as.factor(PLAND))) + geom_line() + 
-  facet_grid( ~ NLSI, labeller = as_labeller(NLSI_names)) + 
+  facet_grid( ~ CLUMPY, labeller = as_labeller(LSI_names)) + 
   geom_ribbon(aes(ymin=visregLwr, ymax=visregUpr, fill = as.factor(PLAND)), alpha=0.1, colour=NA) +
   scale_y_continuous("Community temperature Index") +
   scale_color_manual("Area of SNH", labels = names_fac, values=col.PLAND) +
   scale_fill_manual("Area of SNH", labels = names_fac, values=col.PLAND)
 
 
-
 # grouped by classes (not fragmentation)
-CA_val <- c(mean(cti_AB$CA)-sd(cti_AB$CA), mean(cti_AB$CA), mean(cti_AB$CA)+sd(cti_AB$CA))
-NLSI_val <- seq(from = min(cti_AB$NLSI), to = max(cti_AB$NLSI), length.out = 20)
+PLAND_val <- c(mean(cti_AB$PLAND)-sd(cti_AB$PLAND), mean(cti_AB$PLAND), mean(cti_AB$PLAND)+sd(cti_AB$PLAND))
+LSI_val <- seq(from = min(cti_AB$LSI), to = max(cti_AB$LSI), length.out = 20)
 
-res_class_CA <- c()
-for(i in CA_val){
-  for (j in NLSI_val){
-    p <- visreg(m_frag, xvar = "Year", cond = list(CA = i, NLSI = j), plot = F)
+res_class_PLAND <- c()
+for(i in PLAND_val){
+  for (j in LSI_val){
+    p <- visreg(m_frag, xvar = "Year", cond = list(PLAND = i, LSI = j), plot = F)
     slope <- coefficients(lm(visregFit ~ Year, data = p$fit))[2]
     slopeLw <- coefficients(lm(visregLwr ~ Year, data = p$fit))[2]
     slopeUp <- coefficients(lm(visregUpr ~ Year, data = p$fit))[2]
-    res_class_CA <- bind_rows(res_class_CA, tibble(CA = i, NLSI = j, slope = slope, slopeLw = slopeLw, slopeUp = slopeUp))
+    res_class_PLAND <- bind_rows(res_class_PLAND, tibble(PLAND = i, LSI = j, slope = slope, slopeLw = slopeLw, slopeUp = slopeUp))
   }
 }
 
-ggplot(data = res_class_CA, aes(x = NLSI, y = slope, color = as.factor(CA))) + geom_line() + 
-  geom_ribbon(aes(ymin=slopeLw, ymax=slopeUp, fill = as.factor(CA)), alpha=0.1, colour=NA) +
+ggplot(data = res_class_PLAND, aes(x = LSI, y = slope, color = as.factor(PLAND))) + geom_line() + 
+  geom_ribbon(aes(ymin=slopeLw, ymax=slopeUp, fill = as.factor(PLAND)), alpha=0.1, colour=NA) +
   scale_y_continuous("Temporal trend of CTI") + 
   scale_x_continuous("Fragmentation") + 
-  scale_color_manual("Area of SNH", labels = CA_names, values=col.CA)+
-  scale_fill_manual("Area of SNH", labels = CA_names, values=col.CA)
+  scale_color_manual("Area of SNH", labels = PLAND_names, values=col.PLAND) +
+  scale_fill_manual("Area of SNH", labels = PLAND_names, values=col.PLAND)
 

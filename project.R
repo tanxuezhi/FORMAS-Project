@@ -1,5 +1,6 @@
 library(sp)
 library(raster)
+library(rgeos)
 
 CLC <- raster("//storage.slu.se/Home$/yofo0001/My Documents/Recherche/FORMAS project/Landcover/Corine_land-cover_2012_raster/g100_clc12_V18_5.tif")
 
@@ -35,3 +36,25 @@ write.csv(cbind.data.frame(Site = Sites[,1],
                            Landcover = Landcover),
           "../Data/Butterflies - Finland/Sites_FIN_ETRS89_landcover.csv", row.names = F)
 
+### Sweden ###
+Sites <- rio::import(file = "//storage.slu.se/Home$/yofo0001/My Documents/Recherche/FORMAS project/Data/Birds - Sweden/Koordinater standardrutternas samtliga punkter.xlsx", which = 1L)
+
+Sites_RT90 <- SpatialPoints(Sites[,c(3,4)], proj4string = CRS("+init=epsg:3021"))
+# Sites_WGS84 <- spTransform(Sites_RT90, CRS("+init=epsg:4326"))
+Sites_ETRS89 <- spTransform(Sites_RT90, CRS("+init=epsg:3035"))
+
+centr <- function(x){
+  return(gCentroid(SpatialPoints(x[,c("rt90_o", "rt90_n")]))@coords)
+}
+
+centroids_ETRS89 <- cbind.data.frame(Site = Sites[,1],Sites_ETRS89@coords) %>% 
+  group_by(Site) %>% 
+  do(as.data.frame(centr(.)))
+
+Landcover <- extract(CLC, centroids_ETRS89[,-1])
+
+write.csv(cbind.data.frame(Site = centroids_ETRS89[,1], 
+                           X = centroids_ETRS89[,2], 
+                           Y = centroids_ETRS89[,3],
+                           Landcover = Landcover),
+          "../Data/Birds - Sweden/Sites_SWE_ETRS89_landcover.csv", row.names = F)

@@ -3,6 +3,8 @@ library(raster)
 library(sp)
 library(stringr)
 library(rgeos)
+library(dplyr)
+source("functions.R")
 
 ###load landcover
 # reclassified by semi-natural habitat
@@ -19,6 +21,10 @@ sites_NL <- SpatialPointsDataFrame(sites_NL[,2:3], sites_NL, proj4string = CRS("
 CLC_SNH_NL <- crop(CLC_SNH, extent(sites_NL) + 100000)
 writeRaster(CLC_SNH_NL, "../Landcover/Netherlands/SNH_NL.tif")
 
+sites_SWE <- read.csv(file = "../Data/Birds - Sweden/Sites_SWE_ETRS89_landcover.csv")
+sites_SWE <- SpatialPointsDataFrame(sites_SWE[,2:3], sites_SWE, proj4string = CRS("+init=epsg:3035"))
+CLC_SNH_SWE <- crop(CLC_SNH, extent(sites_SWE) + 100000)
+writeRaster(CLC_SNH_SWE, "../Landcover/Sweden/SNH_SWE.tif")
 
 ##### prepare Fragstat points #####
 pts_Fragstat_FIN <- cbind.data.frame(ID=sites_FIN@data$Site, row = rowFromY(CLC_SNH_FIN, sites_FIN@coords[,"Y"]), col = colFromX(CLC_SNH_FIN, sites_FIN@coords[,"X"]))
@@ -31,24 +37,26 @@ pts_Fragstat_NL <- data.frame(paste0("[",pts_Fragstat_NL[,1],":",pts_Fragstat_NL
 colnames(pts_Fragstat_NL) <- "FPT_TABLE"
 write.table(pts_Fragstat_NL, "../Connectivity/Fragmentation/NL/NL_sites.fpt", row.names = F, quote = F)
 
+pts_Fragstat_SWE <- cbind.data.frame(ID=sites_SWE@data$Site, row = rowFromY(CLC_SNH_SWE, sites_SWE@coords[,"y"]), col = colFromX(CLC_SNH_SWE, sites_SWE@coords[,"x"]))
+
+cbind.data.frame(pts_Fragstat_SWE[,1], 1:nrow(pts_Fragstat_SWE))
+
+pts_Fragstat_SWE <- data.frame(paste0("[",1:nrow(pts_Fragstat_SWE),":",pts_Fragstat_SWE[,2],":",pts_Fragstat_SWE[,3],"]"))
+colnames(pts_Fragstat_SWE) <- "FPT_TABLE"
+write.table(pts_Fragstat_SWE, "../Connectivity/Fragmentation/SWE/SWE_sites.fpt", row.names = F, quote = F)
+
+
 ##### load results #####
 folder <- "../Connectivity/Fragmentation/NL/"
-files_frag <- list.files(folder, pattern = ".class", full.names = T)
+dup.sites <- read.table("../Data/Butterflies - Netherlands/Duplicated_sites.txt", h = T)
+# dup.sites <- read.table("../Data/Birds - Sweden/Duplicated_sites.txt", h = T)
 
-frag_all_scales <- c()
-for(i in 1:length(files_frag)){
-  frag <- readLines(files_frag[i])
-  frag <- gsub(pattern = "N/A", replace = " ", x = frag)
-  writeLines(frag, con=files_frag[i])
-  
-  frag <- read.table(files_frag[i], h=T, sep = ",", dec=".")
-  frag[,1] <- as.numeric(gsub("point_", "", frag[,1]))
-  frag <- frag[,c("LID","NLSI","CA", "PLAND")]
-  
-  frag_all_scales <- rbind.data.frame(frag_all_scales, cbind.data.frame(Scale = str_sub(files_frag[i], -11, -7), frag))
-}
-frag_all_scales$Scale <- gsub("_","",frag_all_scales$Scale)
-write.csv(frag_all_scales, paste0(folder, "Frag_indices.csv"), row.names = F)
+frag <- extractFrag(folder, dup.sites, sites_NL)
+
+frag %>% group_by(Scale) %>% summarise(n = length(LID))
+
+write.csv(frag, paste0(folder, "Frag_indices.csv"), row.names = F)
+
 
 # corrplot(abs(cor(frag[,-c(1,2,36)])), method=c("color"),  
 #          type="upper")
