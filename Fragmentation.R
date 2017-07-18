@@ -1,7 +1,5 @@
-library(corrplot)
 library(raster)
 library(sp)
-library(stringr)
 library(rgeos)
 library(dplyr)
 source("functions.R")

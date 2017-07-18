@@ -1,4 +1,6 @@
 sti <- function(distri, temperature, output){
+  require(raster)
+  require(rgdal)
   sti_list <- c()
   for(i in 1:length(distri)){
     
@@ -19,6 +21,8 @@ sti <- function(distri, temperature, output){
 }
 
 extractRTS <- function(rts, sites, fun, id.col){
+  require(qdapRegex)
+  require(rts)
   res <- c()
   for (i in 1:nlayers(rts@raster)){
     if(is.data.frame(sites)){
@@ -35,7 +39,8 @@ extractRTS <- function(rts, sites, fun, id.col){
   return(res)
 }
 
-extractFrag <- function(folder, dup.sites, sites){
+extractFrag <- function(folder, dup.sites, sites, verbose = F){
+  require(stringr)
   files_frag <- list.files(folder, pattern = ".class", full.names = T)
   frag_all_scales <- c()
   for(i in 1:length(files_frag)){
@@ -51,26 +56,28 @@ extractFrag <- function(folder, dup.sites, sites){
       corres <- cbind.data.frame(Site = sites$Site, SiteID = 1:nrow(sites))
       frag[,1] <- merge(frag, corres, by.x = "LID", by.y = "SiteID")[,"Site"]
     }
-    
     for(j in unique(sites$Site)){
+      if(verbose == T){
+        print(paste("i =",i,"; j =", j))
+      }
       if(all(!j == frag$LID)){
         if(any(j == dup.sites[,1])){
           replace.site <- dup.sites[dup.sites$from == j,2]
-          if(any(frag$LID == replace.site)){
+          if(any(frag$LID %in% replace.site)){
             frag <- rbind.data.frame(frag, cbind.data.frame(LID = j, frag[frag$LID == replace.site,-1]))
           }else{
-            frag <- rbind.data.frame(frag, cbind.data.frame(LID = j, LSI = 1, PLAND = 0, CLUMPY = 1))
+            frag <- rbind.data.frame(frag, cbind.data.frame(LID = j, LSI = NA, PLAND = 0, CLUMPY = NA))
           }
         }else{
           if(any(j == dup.sites[,2])){
             replace.site <- dup.sites[dup.sites$to == j,1]
-            if(any(frag$LID == replace.site)){
+            if(any(frag$LID %in% replace.site)){
               frag <- rbind.data.frame(frag, cbind.data.frame(LID = j, frag[frag$LID == replace.site,-1]))
             }else{
-              frag <- rbind.data.frame(frag, cbind.data.frame(LID = j, LSI = 1, PLAND = 0, CLUMPY = 1))
+              frag <- rbind.data.frame(frag, cbind.data.frame(LID = j, LSI = NA, PLAND = 0, CLUMPY = NA))
             }
           }else{
-            frag <- rbind.data.frame(frag, cbind.data.frame(LID = j, LSI = 1, PLAND = 0, CLUMPY = 1))
+            frag <- rbind.data.frame(frag, cbind.data.frame(LID = j, LSI = NA, PLAND = 0, CLUMPY = NA))
           }
         }
       }
@@ -82,7 +89,10 @@ extractFrag <- function(folder, dup.sites, sites){
 }
 
 
-scaleTest <- function(dataToUse, plot = T){
+scaleTest <- function(dataToUse, plot = T, ...){
+  require(lmerTest)
+  require(lme4)
+  require(MuMIn)
   scale.dat <- c()
   for(i in unique(dataToUse$Scale)){
     if(any(names(dataToUse) == "country")){
@@ -94,39 +104,119 @@ scaleTest <- function(dataToUse, plot = T){
   }
   rownames(scale.dat) <- NULL
   if(plot == T){
-    plot(scale.dat[order(scale.dat$Scale),-3], xlab = "Spatial scale (m)", ylab = "AICc", type = "o", pch = 16)
+    plot(scale.dat[order(scale.dat$Scale),-3], xlab = "Spatial scale (m)", ylab = "AICc", type = "o", pch = 16, ...)
   }
   return(scale.dat)
 }
 
 
-vis.2d <- function(model, var1, var2, var3, n = 10, plot = T){
-  data.mod <- model@frame
+vis.2d <- function(model, var1, var2, var3, n = 10, plot = T, origin, ...){
+  require(dplyr)
   
+  data.mod <- model$model
+  
+  var1_val <- seq(from = min(data.mod[,var1]), to = max(data.mod[,var1]), length.out = n)
   var2_val <- seq(from = min(data.mod[,var2]), to = max(data.mod[,var2]), length.out = n)
   var3_val <- seq(from = min(data.mod[,var3]), to = max(data.mod[,var3]), length.out = n)
   
-  res <- c()
-  n.max <- length(var2_val) * length(var3_val)
-  n <- 0
-  for(i in var2_val){
-    for (j in var3_val){
-      n = n+1
-      cat(paste(round(n/n.max*100, 2), "%, parameters :", var2, "=", round(i,2), ",", var3, "=", round(j,2), "\n"))
-      p <- visreg(model, xvar = var1, cond = setNames(list(i,j), c(var2, var3)), plot = F)
-      slope <- coefficients(lm(visregFit ~ get(var1), data = p$fit))[2]
-      res <- bind_rows(res, tibble(var2 = i, var3 = j, slope = slope))
+  newdata = expand.grid(var1_val, var2_val, var3_val)
+  colnames(newdata) <- c(var1, var2, var3)
+  
+  vars <- all.vars(formula(model))
+  vars <- vars[!vars %in% as.character(model$terms[[2]])]
+  vars <- vars[!vars %in% colnames(newdata)]
+  
+  l = length(names(newdata))
+  for(i in 1:length(vars)){
+    l = l + 1
+    if(is.character(model$model[,vars[i]])){
+      newdata <- cbind.data.frame(newdata, names(which.max(table(model$model[,vars[i]]))))
+      names(newdata)[l] <- vars[i]
+    }else{
+      newdata <- cbind.data.frame(newdata, median(model$model[,vars[i]]))
+      names(newdata)[l] <- vars[i]
     }
   }
   
-
+  pred <- predict(model, newdata = newdata)
+  pred <- cbind.data.frame(pred, newdata)
+  
+  scaleList <- list(scale = attr(origin, "scaled:scale")[c(as.character(model$terms[[2]]), names(newdata))],
+                    center = attr(origin, "scaled:center")[c(as.character(model$terms[[2]]), names(newdata))])
+  
+  pred[,"pred"] <- pred[,"pred"] * scaleList$scale[as.character(model$terms[[2]])] + scaleList$center[as.character(model$terms[[2]])]
+  pred[,var1] <- pred[,var1] * scaleList$scale[var1] + scaleList$center[var1]
+  pred[,var2] <- pred[,var2] * scaleList$scale[var2] + scaleList$center[var2]
+  pred[,var3] <- pred[,var3] * scaleList$scale[var3] + scaleList$center[var3]
+  
+  pred <- pred %>% group_by(get(var2), get(var3)) %>% summarise(fit = lm(pred ~ Year)$coef[2])
+  names(pred)[1:2] <- c(var2,var3)
+  
+  dat <- cbind.data.frame(data.mod[,var2]* scaleList$scale[var2] + scaleList$center[var2],
+                          data.mod[,var3]* scaleList$scale[var3] + scaleList$center[var3])
+  names(dat) <- c(var2, var3)
+  
   if(plot == T){
     
-    quilt.plot(res,  nx = length(var3_val), ny = length(var2_val), 
-               xlab = var3, ylab = var2,
-               main = "")
-    points(get(var2) ~ get(var3), data = data.mod, pch = 16, cex = .4)
+    quilt.plot(pred,  nx = nrow(pred)/n, ny = nrow(pred)/n, 
+               xlab = var2, ylab = var3, ...)
+    points(dat, pch = 16, cex = .4)
   }
-  return(res)
+  return(pred)
+}
+
+vis.1d <- function(model, var1, var2, var3, n = 10, plot = T, origin){
+  require(ggplot2)
+  require(dplyr)
   
+  data.mod <- model$model
+  
+  var1_val <- seq(from = min(data.mod[,var1]), to = max(data.mod[,var1]), length.out = n)
+  var2_val <- c(mean(data.mod[,var2]) - sd(data.mod[,var2]), median(data.mod[,var2]), mean(data.mod[,var2]) + sd(data.mod[,var2]))
+  var3_val <- c(mean(data.mod[,var3]) - sd(data.mod[,var3]), median(data.mod[,var3]), mean(data.mod[,var3]) + sd(data.mod[,var3]))
+  
+  newdata = expand.grid(var1_val, var2_val, var3_val)
+  colnames(newdata) <- c(var1, var2, var3)
+  
+  vars <- all.vars(formula(model))
+  vars <- vars[!vars %in% as.character(model$terms[[2]])]
+  vars <- vars[!vars %in% colnames(newdata)]
+  
+  l = length(names(newdata))
+  for(i in 1:length(vars)){
+    l = l + 1
+    if(is.character(model$model[,vars[i]])){
+      newdata <- cbind.data.frame(newdata, names(which.max(table(model$model[,vars[i]]))))
+      names(newdata)[l] <- vars[i]
+    }else{
+      newdata <- cbind.data.frame(newdata, median(model$model[,vars[i]]))
+      names(newdata)[l] <- vars[i]
+    }
+  }
+  
+  pred <- predict(model, newdata = newdata)
+  pred <- cbind.data.frame(pred, newdata)
+  
+  scaleList <- list(scale = attr(origin, "scaled:scale")[c(as.character(model$terms[[2]]), names(newdata))],
+                    center = attr(origin, "scaled:center")[c(as.character(model$terms[[2]]), names(newdata))])
+  
+  pred[,"pred"] <- pred[,"pred"] * scaleList$scale[as.character(model$terms[[2]])] + scaleList$center[as.character(model$terms[[2]])]
+  pred[,var1] <- pred[,var1] * scaleList$scale[var1] + scaleList$center[var1]
+  pred[,var2] <- pred[,var2] * scaleList$scale[var2] + scaleList$center[var2]
+  pred[,var3] <- pred[,var3] * scaleList$scale[var3] + scaleList$center[var3]
+  
+  if(plot == T){
+    var3_names <- c("Small","Medium","Large"); names(var3_names) <- unique(pred[,var3])
+    var2_names <- c("Highly fragmentated","Moderately fragmentated","Little fragmentated"); names(var2_names) <- unique(pred[,var2])
+    
+    col.var3 <- c("dodgerblue", "gold2", "firebrick"); names(col.var3) <- unique(pred[,var3])
+    
+    p <- ggplot(data = pred, aes(x = get(var1), y = pred, color = as.factor(get(var3)))) + geom_line() + 
+      facet_grid( ~ get(var2), labeller = as_labeller(var2_names)) + 
+      scale_y_continuous("Community temperature Index") +
+      scale_x_continuous(var1) +
+      scale_color_manual("Area of SNH", labels = var3_names, values=col.var3)
+    print(p)
+  }
+  return(as.tbl(pred))
 }
