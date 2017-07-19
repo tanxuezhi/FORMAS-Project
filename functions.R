@@ -99,11 +99,11 @@ scaleTest <- function(dataToUse, plot = T, main = NULL){
   for(i in unique(dataToUse$Scale)){
     if(any(names(dataToUse) == "country")){
       m_frag_std <- gamm(cti ~ CLUMPY * PLAND * Year + LABEL3 + s(X,Y, bs = "tp"), 
-                         random = list(Site = ~1), correlation = corCAR1(form = ~Year|Site),
+                         random = list(country = ~1, Site = ~1), correlation = corCAR1(form = ~Year|Site),
                          data = data.frame(stdize(subset(dataToUse, dataToUse$Scale == i), prefix = F)))
     }else{
       m_frag_std <- gamm(cti ~ CLUMPY * PLAND * Year + LABEL3 + s(X,Y, bs = "tp"), 
-                                     random = list(country = ~1, Site = ~1), correlation = corCAR1(form = ~Year|Site),
+                                     random = list(Site = ~1), correlation = corCAR1(form = ~Year|Site),
                                      data = data.frame(stdize(subset(dataToUse, dataToUse$Scale == i), prefix = F)))
     }
     sum.m <- summary(m_frag_std$gam)
@@ -125,7 +125,7 @@ scaleTest <- function(dataToUse, plot = T, main = NULL){
            aes(x= Scale, y = Estimate, color = Variable)) +
       # geom_errorbar(aes(ymin=Estimate-SE, ymax=Estimate+SE), width = 0) +
       geom_point(size = 2) + 
-      geom_text(aes(x= Scale, y = (Estimate + .004),
+      geom_text(aes(x= Scale, y = (Estimate + .04 * diff(range(Estimate))),
                 label = Significance))+
       geom_hline(yintercept=0, lty = 2) +
       geom_line() + ggtitle(main) + 

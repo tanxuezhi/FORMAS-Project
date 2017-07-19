@@ -61,29 +61,29 @@ butterflies.data.sel <- butterflies.data %>%
 birds.data.sel <- birds.data %>% 
   filter(!Site %in% c((birds.data %>% filter(is.na(CLUMPY)) %>% count(Site))[,"Site"])$Site)
 
-## run models across scales ##
+## run models across scales ## (export plots 800 x 600)
 par(mfrow=c(2,2))
-scaleFrag_butterflies_Ab <- scaleTest(butterflies.data.sel %>% filter(type == "Abundance"), 
+scaleFrag_butterflies_Ab <- scaleTest(butterflies.data %>% filter(type == "Abundance"), 
                                       main = "Butterflies - Abundance")
-scaleFrag_birds_Ab <- scaleTest(birds.data.sel %>% filter(type == "Abundance"), 
+scaleFrag_birds_Ab <- scaleTest(birds.data %>% filter(type == "Abundance"), 
                                 main = "Birds - Abundance")
-scaleFrag_butterflies_P <- scaleTest(butterflies.data.sel %>% filter(type == "Presence"), 
+scaleFrag_butterflies_P <- scaleTest(butterflies.data %>% filter(type == "Presence"), 
                                      main = "Butterflies - Presence")
-scaleFrag_birds_P <- scaleTest(birds.data.sel %>% filter(type == "Presence"), 
+scaleFrag_birds_P <- scaleTest(birds.data %>% filter(type == "Presence"), 
                                main = "Birds - Presence")
 
-## select data at optimal scale ##
-butterflies.data.scale.Ab <- butterflies.data %>% 
-  filter(Scale == scaleFrag_butterflies_Ab[order(scaleFrag_butterflies_Ab$AICc),"Scale"][1])
-butterflies.data.scale.P <- butterflies.data %>% 
-  filter(Scale == scaleFrag_butterflies_Ab[order(scaleFrag_butterflies_P$AICc),"Scale"][1])
-birds.data.scale.Ab <- birds.data %>% 
-  filter(Scale == scaleFrag_birds_Ab[order(scaleFrag_birds_Ab$AICc),"Scale"][1])
-birds.data.scale.P <- birds.data %>% 
-  filter(Scale == scaleFrag_birds_Ab[order(scaleFrag_birds_P$AICc),"Scale"][1])
+## select data at optimal scale (not reliable) ##
+# butterflies.data.scale.Ab <- butterflies.data %>% 
+#   filter(Scale == scaleFrag_butterflies_Ab[order(scaleFrag_butterflies_Ab$AICc),"Scale"][1])
+# butterflies.data.scale.P <- butterflies.data %>% 
+#   filter(Scale == scaleFrag_butterflies_Ab[order(scaleFrag_butterflies_P$AICc),"Scale"][1])
+# birds.data.scale.Ab <- birds.data %>% 
+#   filter(Scale == scaleFrag_birds_Ab[order(scaleFrag_birds_Ab$AICc),"Scale"][1])
+# birds.data.scale.P <- birds.data %>% 
+#   filter(Scale == scaleFrag_birds_Ab[order(scaleFrag_birds_P$AICc),"Scale"][1])
 
 ## select data at user-defined scale ##
-butterflies.data.scale <- butterflies.data %>% filter(Scale == 5000)
+butterflies.data.scale <- butterflies.data %>% filter(Scale == 10000)
 birds.data.scale <- birds.data %>% filter(Scale == 25000)
 
 
