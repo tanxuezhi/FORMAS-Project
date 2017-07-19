@@ -89,23 +89,55 @@ extractFrag <- function(folder, dup.sites, sites, verbose = F){
 }
 
 
-scaleTest <- function(dataToUse, plot = T, ...){
+scaleTest <- function(dataToUse, plot = T, main = NULL){
   require(lmerTest)
   require(lme4)
   require(MuMIn)
+  require(ggplot2)
+  
   scale.dat <- c()
   for(i in unique(dataToUse$Scale)){
     if(any(names(dataToUse) == "country")){
-      m_frag_std <- lmer(cti ~ CLUMPY * PLAND * Year + X*Y + LABEL3 + (1|country/Site), data = stdize(subset(dataToUse, dataToUse$Scale == i), prefix = F), na.action = na.fail)
+      m_frag_std <- gamm(cti ~ CLUMPY * PLAND * Year + LABEL3 + s(X,Y, bs = "tp"), 
+                         random = list(Site = ~1), correlation = corCAR1(form = ~Year|Site),
+                         data = data.frame(stdize(subset(dataToUse, dataToUse$Scale == i), prefix = F)))
     }else{
-      m_frag_std <- lmer(cti ~ CLUMPY * PLAND * Year + X*Y + LABEL3 + (1|Site), data = stdize(subset(dataToUse, dataToUse$Scale == i), prefix = F), na.action = na.fail)
+      m_frag_std <- gamm(cti ~ CLUMPY * PLAND * Year + LABEL3 + s(X,Y, bs = "tp"), 
+                                     random = list(country = ~1, Site = ~1), correlation = corCAR1(form = ~Year|Site),
+                                     data = data.frame(stdize(subset(dataToUse, dataToUse$Scale == i), prefix = F)))
     }
-    scale.dat <- rbind.data.frame(scale.dat, cbind.data.frame(Scale = i, AICc = AICc(m_frag_std), coefInter = fixef(m_frag_std)["CLUMPY:PLAND:Year"]))
+    sum.m <- summary(m_frag_std$gam)
+    sum.m <- cbind(sum.m$p.coeff, sum.m$se, sum.m$p.pv)
+    sum.m <- sum.m[-grep("X,Y", rownames(sum.m)),]
+    sum.m <- sum.m[-grep("LABEL", rownames(sum.m)),]
+    sum.m <- as.data.frame(sum.m)
+    sum.m$Variable <- rownames(sum.m)
+    rownames(sum.m) <- NULL
+    colnames(sum.m)[1:3] <- c("Estimate", "SE", "pvalue")
+    
+    scale.dat <- rbind.data.frame(scale.dat, cbind.data.frame(Scale = i, 
+                                                              sum.m))
   }
-  rownames(scale.dat) <- NULL
+  scale.dat$Significance <- ifelse(scale.dat$pvalue < .001, "***", ifelse(scale.dat$pvalue < .01, "**", ifelse(scale.dat$pvalue < .05, "*", ifelse(scale.dat$pvalue < .1, ".", ""))))
+
   if(plot == T){
-    plot(scale.dat[order(scale.dat$Scale),-3], xlab = "Spatial scale (m)", ylab = "AICc", type = "o", pch = 16, ...)
-  }
+    p <- ggplot(data = scale.dat[scale.dat$Variable %in% c("PLAND:Year", "CLUMPY:Year", "CLUMPY:PLAND:Year"),],
+           aes(x= Scale, y = Estimate, color = Variable)) +
+      # geom_errorbar(aes(ymin=Estimate-SE, ymax=Estimate+SE), width = 0) +
+      geom_point(size = 2) + 
+      geom_text(aes(x= Scale, y = (Estimate + .004),
+                label = Significance))+
+      geom_hline(yintercept=0, lty = 2) +
+      geom_line() + ggtitle(main) + 
+      scale_color_manual("Interactions", 
+                         values = c("#EE7600", "#698B69", "#00B2EE"), 
+                         labels = c("Clumpiness x % SNH x Year", 
+                                    "Clumpiness x Year",
+                                    "% SNH x Year")) +
+      scale_x_continuous("Spatial scale (m)")
+    
+    print(p)
+    }
   return(scale.dat)
 }
 

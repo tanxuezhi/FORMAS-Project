@@ -89,7 +89,7 @@ birds.data.scale <- birds.data %>% filter(Scale == 25000)
 
 ##### Run analyses ####
 ## standardize data (or not)
-std.butterflies.data.scale <- stdize(butterflies.data.scale.Ab %>% filter(type == "Abundance"), prefix = F)
+std.butterflies.data.scale <- stdize(butterflies.data.scale %>% filter(type == "Abundance"), prefix = F)
 std.butterflies.data.scale$Site <- as.factor(std.butterflies.data.scale$Site)
 
 std.birds.data.scale <- stdize(birds.data.scale.Ab %>% filter(type == "Abundance"), prefix = F)
