@@ -72,6 +72,33 @@ scaleFrag_butterflies_P <- scaleTest(butterflies.data %>% filter(type == "Presen
 scaleFrag_birds_P <- scaleTest(birds.data %>% filter(type == "Presence"), 
                                main = "Birds - Presence")
 
+# merge results
+scaleFrag <- rbind(cbind.data.frame(species = "Butterflies", type = "Abundance", scaleFrag_butterflies_Ab),
+                   cbind.data.frame(species = "Birds", type = "Abundance", scaleFrag_birds_Ab),
+                   cbind.data.frame(species = "Butterflies", type = "Presence", scaleFrag_butterflies_P),
+                   cbind.data.frame(species = "Birds", type = "Presence", scaleFrag_birds_P))
+
+# save results
+save.image("scaleTests.RData")
+# load results
+load("scaleTests.RData")
+
+# plot results
+ggplot(data = scaleFrag[scaleFrag$Variable %in% c("PLAND:Year", "CLUMPY:Year", "CLUMPY:PLAND:Year"),],
+       aes(x= Scale, y = Estimate, color = Variable)) + facet_grid(type ~ species) +
+  geom_errorbar(aes(ymin=Estimate-SE, ymax=Estimate+SE), width = 0) +
+  geom_point(size = 2) + 
+  geom_text(aes(x= Scale, y = (Estimate + .04 * diff(range(Estimate))),
+                label = Significance))+
+  geom_hline(yintercept=0, lty = 2) +
+  geom_line() + 
+  scale_color_manual("Interactions", 
+                     values = c("#EE7600", "#698B69", "#00B2EE"), 
+                     labels = c("Clumpiness x\n% SNH x Year", 
+                                "Clumpiness x Year",
+                                "% SNH x Year")) +
+  scale_x_continuous("Spatial scale (m)")
+
 ## select data at optimal scale (not reliable) ##
 # butterflies.data.scale.Ab <- butterflies.data %>% 
 #   filter(Scale == scaleFrag_butterflies_Ab[order(scaleFrag_butterflies_Ab$AICc),"Scale"][1])
