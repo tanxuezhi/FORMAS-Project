@@ -47,9 +47,15 @@ write.table(pts_Fragstat_SWE, "../Connectivity/Fragmentation/SWE/SWE_sites.fpt",
 ##### load results #####
 folder <- "../Connectivity/Fragmentation/NL/"
 dup.sites <- read.table("../Data/Butterflies - Netherlands/Duplicated_sites.txt", h = T)
-# dup.sites <- read.table("../Data/Birds - Sweden/Duplicated_sites.txt", h = T)
-
 frag <- extractFrag(folder, dup.sites, sites_NL)
+
+# folder <- "../Connectivity/Fragmentation/FIN/"
+# dup.sites <- read.table("../Data/Butterflies - Finland/Duplicated_sites.txt", h = T)
+# frag <- extractFrag(folder, dup.sites, sites_FIN)
+
+# folder <- "../Connectivity/Fragmentation/SWE/"
+# dup.sites <- read.table("../Data/Birds - Sweden/Duplicated_sites.txt", h = T)
+# frag <- extractFrag(folder, dup.sites, sites_SWE)
 
 frag %>% group_by(Scale) %>% summarise(n = length(LID))
 
@@ -62,21 +68,48 @@ write.csv(frag, paste0(folder, "Frag_indices.csv"), row.names = F)
 # plot(frag[,c("NLSI","CA")])
 
 
-
 # find examplary points
-pt3 <- SpatialPoints(sites[sites$NLSI > 0.20 &  sites$CA < 5000, ][1,c("X", "Y")]) #upper-left corner
-pt2 <- SpatialPoints(sites[sites$NLSI > 0.15 &  sites$CA > 25000, ][1,c("X", "Y")]) #upper-right corner
-pt1 <- SpatialPoints(sites[sites$NLSI < 0.05 &  sites$CA < 5000, ][1,c("X", "Y")]) #lower-left corner
-pt4 <- SpatialPoints(sites[sites$NLSI < 0.07 &  sites$CA > 25000, ][1,c("X", "Y")]) #lower-right corner
+pts <- read.csv("../Connectivity/Fragmentation/NL/Frag_indices.csv")
+pts <- pts %>% filter(Scale == 5000)
 
-pts <- rbind(pt3, pt2, pt1, pt4)
-Buf <- gBuffer(pts, width=bufferWidth, byid = T)
+sites_NL <- read.csv(file = "../Data/Butterflies - Netherlands/Sites_NL_ETRS89_landcover.csv")
+sites_NL <- SpatialPointsDataFrame(sites_NL[,2:3], sites_NL, proj4string = CRS("+init=epsg:3035"))
 
-bufferWidth <- 10000
+plot(CLUMPY ~ PLAND, pts)
+plot(NLSI ~ PLAND, pts)
+plot(NLSI ~ CLUMPY, pts)
+
+
+pt1 <- sites_NL[sites_NL$Site == pts[pts$CLUMPY < 0.80 &  pts$PLAND < 30, "LID"][1],]#lower-left corner
+pt2 <- sites_NL[sites_NL$Site == pts[pts$CLUMPY < 0.80 &  pts$PLAND > 60, "LID"][1],] #lower-right corner
+pt3 <- sites_NL[sites_NL$Site == pts[pts$CLUMPY > 0.90 &  pts$PLAND < 30, "LID"][1],] #upper-left corner
+pt4 <- sites_NL[sites_NL$Site == pts[pts$CLUMPY > 0.90 &  pts$PLAND > 60, "LID"][1],] #upper-right corner
+
+pts <- rbind(pt3, pt4, pt1, pt2)
+Buf <- gBuffer(pts, width=5000, byid = T)
 
 par(mfrow=c(2,2), mar=c(2,2,2,2))
 for(i in 1:length(Buf)){
-  landBuf <- mask(CLC_SNH_NL, Buf[i])
+  landBuf <- mask(CLC_SNH_NL, Buf[i,])
   landBuf <- trim(landBuf, pad=2)
   plot(landBuf, legend = F, axes = F, box = F, col=c("gold1", "green4"))
 }
+
+
+# difference btw. countries
+library(data.table)
+library(ggplot2)
+butterflies.data <- as.tbl(fread("../Data/cti_butterflies_data.csv"))
+birds.data <- as.tbl(fread("../Data/cti_birds_data.csv"))
+
+birds.data$country <- "SWE"
+
+dat <- rbind(butterflies.data, birds.data)
+dat <- subset(dat, dat$Scale == 5000)
+dat <- dat %>% group_by (Site) %>% summarize_all(max)
+# dat <- dat %>% filter(CLUMPY > .5)
+
+ggplot(data = dat, aes(y = CLUMPY, x = PLAND, colour = country)) + geom_point() + theme_classic()
+
+ggplot(data = dat, aes(y = PD, x = PLAND, colour = country)) + geom_point() + theme_classic() +
+  facet_grid(~country)
