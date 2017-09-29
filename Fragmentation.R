@@ -101,7 +101,6 @@ library(data.table)
 library(ggplot2)
 butterflies.data <- as.tbl(fread("../Data/cti_butterflies_data.csv"))
 birds.data <- as.tbl(fread("../Data/cti_birds_data.csv"))
-
 birds.data$country <- "SWE"
 
 dat <- rbind(butterflies.data, birds.data)
@@ -109,7 +108,7 @@ dat <- subset(dat, dat$Scale == 5000)
 dat <- dat %>% group_by (Site) %>% summarize_all(max)
 # dat <- dat %>% filter(CLUMPY > .5)
 
-ggplot(data = dat, aes(y = CLUMPY, x = PLAND, colour = country)) + geom_point() + theme_classic()
+ggplot(data = dat[dat$CLUMPY > 0,], aes(y = CLUMPY, x = PLAND, colour = country)) + geom_point(alpha = .5) + theme_classic()
 
-ggplot(data = dat, aes(y = PD, x = PLAND, colour = country)) + geom_point() + theme_classic() +
+ggplot(data = dat, aes(y = CLUMPY, x = PLAND, colour = country)) + geom_point() + theme_classic() +
   facet_grid(~country)

@@ -6,6 +6,7 @@ library(cowplot)
 library(MuMIn)
 library(HH)
 library(data.table)
+library(MuMIn)
 library(lsmeans)
 library(mgcv)
 source("functions.R")
@@ -53,7 +54,10 @@ points(lsmean ~ Year, ctiYear_lsmeans3, type = "o", pch = 16, col = "red")
 ##### Effect of fragmentation #####
 ###################################
 
+############################
 ##### Test scale effect ####
+############################
+
 ## select only sites without NA
 butterflies.data.sel <- butterflies.data %>% 
   filter(!Site %in% c((butterflies.data %>% filter(is.na(CLUMPY)) %>% count(Site))[,"Site"])$Site)
@@ -99,7 +103,6 @@ ggplot(data = scaleFrag[scaleFrag$Variable %in% c("PLAND:Year", "CLUMPY:Year", "
                                 "% SNH x Year")) +
   scale_x_continuous("Spatial scale (m)")
 
-
 ## select data at optimal scale  ##
 butterflies.data.scale.Ab <- butterflies.data %>%
   filter(Scale == scaleFrag_butterflies_Ab[order(scaleFrag_butterflies_Ab$AICc),"Scale"][1])
@@ -110,60 +113,159 @@ birds.data.scale.Ab <- birds.data %>%
 birds.data.scale.P <- birds.data %>%
   filter(Scale == scaleFrag_birds_Ab[order(scaleFrag_birds_P$AICc),"Scale"][1])
 
+#######################################
 ## select data at user-defined scale ##
+#######################################
+
 butterflies.data.scale <- butterflies.data %>% filter(Scale == 5000)
 birds.data.scale <- birds.data %>% filter(Scale == 5000)
 
 
 ##### Run analyses ####
-### gamm ###
+### glmer ###
 ## butterflies
 # Abundance
-std.butterflies.data.scale_Ab <- stdize(butterflies.data.scale.Ab %>% filter(type == "Abundance"), prefix = F)
+std.butterflies.data.scale_Ab <- stdize(butterflies.data.scale %>% filter(type == "Abundance"), prefix = F, omit.cols = "gridCell50")
 std.butterflies.data.scale_Ab$Site <- as.factor(std.butterflies.data.scale_Ab$Site)
 
-m_frag_butterflies_Ab1 <- gamm(cti ~ CLUMPY * PLAND * Year + LABEL3 + s(X,Y, bs = "tp"), 
-                               random = list(country = ~1, Site = ~1), correlation = corCAR1(form = ~Year|Site),
-                               data = data.frame(std.butterflies.data.scale_Ab))
-anova(m_frag_butterflies_Ab1$gam)
+# m_frag_butterflies_Ab1 <- gamm(cti ~ CLUMPY * PLAND * Year + LABEL3 + s(X,Y, bs = "tp"), 
+#                                random = list(country = ~1, Site = ~1), correlation = corCAR1(form = ~Year|country/Site),
+#                                data = data.frame(std.butterflies.data.scale_Ab))
+# anova(m_frag_butterflies_Ab1$gam)
 # summary(m_frag_butterflies_Ab1$gam)
 
+
+m_frag_butterflies_Ab1 <- lmer(cti ~ CLUMPY * PLAND * Year + X*Y +
+                                 (1|country/gridCell50/Site),
+                               data = data.frame(std.butterflies.data.scale_Ab %>% filter(!is.na(CLUMPY))), 
+                               REML = F, na.action = na.fail)
+
+summary(m_frag_butterflies_Ab1)
+fixef(m_frag_butterflies_Ab1)
+r.squaredGLMM(m_frag_butterflies_Ab1)
+
+dredge(m_frag_butterflies_Ab1, fixed = c("X", "Y", "Year"),
+       subset = .(+X) & ((`CLUMPY:Year` & !PLAND) | 
+                           (`PLAND:Year` & !CLUMPY) | 
+                           (`CLUMPY:PLAND:Year`) | 
+                           (`PLAND:Year` & `CLUMPY:Year` & !`CLUMPY:PLAND`) |
+                           (!PLAND & !CLUMPY)),
+       extra = r.squaredGLMM)
+
+lsmeans_but_Ab <- lsmeans(m_frag_butterflies_Ab1, 
+              ~ CLUMPY * PLAND, 
+              trend = "Year", 
+              at= list(CLUMPY = c(-1,1), PLAND = c(-1,1)))
+test(lsmeans_but_Ab)
+pairs(lsmeans_but_Ab)
+lsmip(lsmeans_but_Ab, CLUMPY ~ PLAND)
+
 # Presence
-std.butterflies.data.scale_P <- stdize(butterflies.data.scale.P %>% filter(type == "Presence"), prefix = F)
+std.butterflies.data.scale_P <- stdize(butterflies.data.scale %>% filter(type == "Presence"), prefix = F, omit.cols = "gridCell50")
 std.butterflies.data.scale_P$Site <- as.factor(std.butterflies.data.scale_P$Site)
 
-m_frag_butterflies_P1 <- gamm(cti ~ CLUMPY * PLAND * Year + LABEL3 + s(X,Y, bs = "tp"), 
-                              random = list(country = ~1, Site = ~1), correlation = corCAR1(form = ~Year|Site),
-                              data = data.frame(std.butterflies.data.scale_P))
-anova(m_frag_butterflies_P1$gam)
+# m_frag_butterflies_P1 <- gamm(cti ~ CLUMPY * PLAND * Year + LABEL3 + s(X,Y, bs = "tp"), 
+#                               random = list(country = ~1, Site = ~1), correlation = corCAR1(form = ~Year|country/Site),
+#                               data = data.frame(std.butterflies.data.scale_P))
+# anova(m_frag_butterflies_P1$gam)
 # summary(m_frag_butterflies_P1$gam)
 
+m_frag_butterflies_P1 <- lmer(cti ~ CLUMPY * PLAND * Year + X*Y +
+                                (1|country/gridCell50/Site),
+                              data = data.frame(std.butterflies.data.scale_P %>% filter(!is.na(CLUMPY))), REML = F)
+summary(m_frag_butterflies_P1)
+fixef(m_frag_butterflies_P1)
+r.squaredGLMM(m_frag_butterflies_P1)
+
+dredge(m_frag_butterflies_P1, fixed = c("X", "Y", "Year"),
+       subset = .(+X) & ((`CLUMPY:Year` & !PLAND) | 
+                           (`PLAND:Year` & !CLUMPY) | 
+                           (`CLUMPY:PLAND:Year`) | 
+                           (`PLAND:Year` & `CLUMPY:Year` & !`CLUMPY:PLAND`) |
+                           (!PLAND & !CLUMPY)),
+       extra = r.squaredGLMM)
+
+lsmeans_but_P <- lsmeans(m_frag_butterflies_P1, 
+              ~ CLUMPY * PLAND, 
+              trend = "Year", 
+              at= list(CLUMPY = c(-1,1), PLAND = c(-1,1)))
+test(lsmeans_but_P)
+pairs(lsmeans_but_P)
+lsmip(lsmeans_but_P, CLUMPY ~ PLAND)
 
 ## birds
 # Abundance
-std.birds.data.scale_Ab <- stdize(birds.data.scale.Ab %>% filter(type == "Abundance"), prefix = F)
+std.birds.data.scale_Ab <- stdize(birds.data.scale %>% filter(type == "Abundance"), prefix = F, omit.cols = "gridCell50")
 std.birds.data.scale_Ab$Site <- as.factor(std.birds.data.scale_Ab$Site)
 
-m_frag_birds_Ab1 <- gamm(cti ~ CLUMPY * PLAND * Year + LABEL3 + s(X,Y, bs = "tp"), 
-                         random = list(Site = ~1), correlation = corCAR1(form = ~Year|Site),
-                         data = data.frame(std.birds.data.scale_Ab))
-anova(m_frag_birds_Ab1$gam)
+# m_frag_birds_Ab1 <- gamm(cti ~ CLUMPY * PLAND * Year + s(X,Y, bs = "tp"), 
+#                          random = list(Site = ~1), correlation = corCAR1(form = ~Year|Site),
+#                          data = data.frame(std.birds.data.scale_Ab))
+# anova(m_frag_birds_Ab1$gam)
+# summary(m_frag_birds_Ab1$gam)
+
+m_frag_birds_Ab1 <- lmer(cti ~ CLUMPY * PLAND * Year + X*Y +
+                           (1|gridCell50/Site),
+                         data = data.frame(std.birds.data.scale_Ab %>% filter(!is.na(CLUMPY))), REML = F)
+summary(m_frag_birds_Ab1)
+fixef(m_frag_birds_Ab1)
+r.squaredGLMM(m_frag_birds_Ab1)
+
+dredge(m_frag_birds_Ab1, fixed = c("X", "Y", "Year"),
+       subset = .(+X) & ((`CLUMPY:Year` & !PLAND) | 
+                           (`PLAND:Year` & !CLUMPY) | 
+                           (`CLUMPY:PLAND:Year`) | 
+                           (`PLAND:Year` & `CLUMPY:Year` & !`CLUMPY:PLAND`) |
+                           (!PLAND & !CLUMPY)),
+       extra = r.squaredGLMM)
+
+lsmeans_bird_Ab <- lsmeans(m_frag_birds_Ab1, 
+                          ~ CLUMPY * PLAND, 
+                          trend = "Year", 
+                          at= list(CLUMPY = c(-1,1), PLAND = c(-1,1)))
+test(lsmeans_bird_Ab)
+pairs(lsmeans_bird_Ab)
+lsmip(lsmeans_bird_Ab, CLUMPY ~ PLAND)
 
 # Presence
-std.birds.data.scale_P <- stdize(birds.data.scale %>% filter(type == "Presence"), prefix = F)
+std.birds.data.scale_P <- stdize(birds.data.scale %>% filter(type == "Presence"), prefix = F, omit.cols = "gridCell50")
 std.birds.data.scale_P$Site <- as.factor(std.birds.data.scale_P$Site)
 
-m_frag_birds_P1 <- gamm(cti ~ CLUMPY * PLAND * Year + LABEL3 + s(X,Y, bs = "tp"), 
-                        random = list(Site = ~1), correlation = corCAR1(form = ~Year|Site),
-                        data = data.frame(std.birds.data.scale_P))
-anova(m_frag_birds_P1$gam)
+# m_frag_birds_P1 <- gamm(cti ~ CLUMPY * PLAND * Year + s(X,Y, bs = "tp"), 
+#                         random = list(Site = ~1), correlation = corCAR1(form = ~Year|Site),
+#                         data = data.frame(std.birds.data.scale_P))
+# anova(m_frag_birds_P1$gam)
+# summary(m_frag_birds_P1$gam)
+
+m_frag_birds_P1 <- lmer(cti ~ CLUMPY * PLAND * Year + X*Y +
+                           (1|gridCell50/Site),
+                        data = data.frame(std.birds.data.scale_P %>% filter(!is.na(CLUMPY))), REML = F)
+summary(m_frag_birds_P1)
+fixef(m_frag_birds_P1)
+r.squaredGLMM(m_frag_birds_P1)
+
+dredge(m_frag_birds_P1, fixed = c("X", "Y", "Year"), 
+       subset = .(+X) & ((`CLUMPY:Year` & !PLAND) | 
+                           (`PLAND:Year` & !CLUMPY) | 
+                           (`CLUMPY:PLAND:Year`) | 
+                           (`PLAND:Year` & `CLUMPY:Year` & !`CLUMPY:PLAND`) |
+                           (!PLAND & !CLUMPY)),
+       extra = r.squaredGLMM)
+
+lsmeans_bird_P <- lsmeans(m_frag_birds_P1, 
+                           ~ CLUMPY * PLAND, 
+                           trend = "Year", 
+                           at= list(CLUMPY = c(-1,1), PLAND = c(-1,1)))
+test(lsmeans_bird_P)
+pairs(lsmeans_bird_P)
+lsmip(lsmeans_bird_P, CLUMPY ~ PLAND)
 
 # plot by groups (export 800*500)
-plot_butterflies_Ab <- vis.1d(m_frag_butterflies_Ab1$gam, "Year", "CLUMPY", "PLAND", origin = std.butterflies.data.scale_Ab)
-plot_butterflies_P <- vis.1d(m_frag_butterflies_P1$gam, "Year", "CLUMPY", "PLAND", origin = std.butterflies.data.scale_P)
+plot_butterflies_Ab <- vis.1d(m_frag_butterflies_Ab1, "Year", "CLUMPY", "PLAND", origin = std.butterflies.data.scale_Ab)
+plot_butterflies_P <- vis.1d(m_frag_butterflies_P1, "Year", "CLUMPY", "PLAND", origin = std.butterflies.data.scale_P)
 
-plot_birds_Ab <- vis.1d(m_frag_birds_Ab1$gam, "Year", "CLUMPY", "PLAND", origin = std.birds.data.scale_Ab)
-plot_birds_P <- vis.1d(m_frag_birds_P1$gam, "Year", "CLUMPY", "PLAND", origin = std.birds.data.scale_P)
+plot_birds_Ab <- vis.1d(m_frag_birds_Ab1, "Year", "CLUMPY", "PLAND", origin = std.birds.data.scale_Ab)
+plot_birds_P <- vis.1d(m_frag_birds_P1, "Year", "CLUMPY", "PLAND", origin = std.birds.data.scale_P)
 
 plot_data <- rbind.data.frame(cbind.data.frame(type= "Abundance", species = "Butterflies", plot_butterflies_Ab),
                               cbind.data.frame(type= "Presence", species = "Butterflies", plot_butterflies_P),

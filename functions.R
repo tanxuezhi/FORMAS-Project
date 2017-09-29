@@ -230,7 +230,7 @@ vis.1d <- function(model, var1, var2, var3, n = 10, plot = T, origin){
   require(ggplot2)
   require(dplyr)
   
-  data.mod <- model$model
+  data.mod <- model@frame
   
   var1_val <- seq(from = min(data.mod[,var1]), to = max(data.mod[,var1]), length.out = n)
   var2_val <- c(mean(data.mod[,var2]) - sd(data.mod[,var2]), median(data.mod[,var2]), mean(data.mod[,var2]) + sd(data.mod[,var2]))
@@ -240,32 +240,28 @@ vis.1d <- function(model, var1, var2, var3, n = 10, plot = T, origin){
   colnames(newdata) <- c(var1, var2, var3)
   
   vars <- all.vars(formula(model))
-  vars <- vars[!vars %in% as.character(model$terms[[2]])]
+  vars <- vars[!vars %in% as.character(attr(data.mod, "terms")[[2]])]
   vars <- vars[!vars %in% colnames(newdata)]
   
   l = length(names(newdata))
   for(i in 1:length(vars)){
     l = l + 1
-    if(is.character(model$model[,vars[i]])){
-      newdata <- cbind.data.frame(newdata, names(which.max(table(model$model[,vars[i]]))))
+    if(is.character(data.mod[,vars[i]]) | is.factor(data.mod[,vars[i]])){
+      newdata <- cbind.data.frame(newdata, names(which.max(table(data.mod[,vars[i]]))))
       names(newdata)[l] <- vars[i]
     }else{
-      newdata <- cbind.data.frame(newdata, median(model$model[,vars[i]]))
+      newdata <- cbind.data.frame(newdata, median(data.mod[,vars[i]]))
       names(newdata)[l] <- vars[i]
     }
   }
   
-  pred <- predict(model, newdata = newdata, se.fit = TRUE)
-  pred <- cbind.data.frame(fit = pred$fit, se.fit = pred$se.fit, newdata)
-  pred$upr <- pred[,"fit"] + pred[,"se.fit"]
-  pred$lwr <- pred[,"fit"] - pred[,"se.fit"]
+  pred <- predict(model, newdata = newdata, se.fit = F, re.form = NA)
+  pred <- cbind.data.frame(fit = pred, newdata)
 
-  scaleList <- list(scale = attr(origin, "scaled:scale")[c(as.character(model$terms[[2]]), names(newdata))],
-                    center = attr(origin, "scaled:center")[c(as.character(model$terms[[2]]), names(newdata))])
+  scaleList <- list(scale = attr(origin, "scaled:scale")[c(as.character(attr(data.mod, "terms")[[2]]), names(newdata))],
+                    center = attr(origin, "scaled:center")[c(as.character(attr(data.mod, "terms")[[2]]), names(newdata))])
   
-  pred[,"fit"] <- pred[,"fit"] * scaleList$scale[as.character(model$terms[[2]])] + scaleList$center[as.character(model$terms[[2]])]
-  pred[,"upr"] <- pred[,"upr"] * scaleList$scale[as.character(model$terms[[2]])] + scaleList$center[as.character(model$terms[[2]])]
-  pred[,"lwr"] <- pred[,"lwr"] * scaleList$scale[as.character(model$terms[[2]])] + scaleList$center[as.character(model$terms[[2]])]
+  pred[,"fit"] <- pred[,"fit"] * scaleList$scale[as.character(attr(data.mod, "terms")[[2]])] + scaleList$center[as.character(attr(data.mod, "terms")[[2]])]
   pred[,var1] <- pred[,var1] * scaleList$scale[var1] + scaleList$center[var1]
   pred[,var2] <- pred[,var2] * scaleList$scale[var2] + scaleList$center[var2]
   pred[,var3] <- pred[,var3] * scaleList$scale[var3] + scaleList$center[var3]
@@ -278,7 +274,6 @@ vis.1d <- function(model, var1, var2, var3, n = 10, plot = T, origin){
     
     p <- ggplot(data = pred, aes(x = get(var1), y = fit, color = as.factor(get(var2)))) + geom_line() + 
       facet_grid( ~ get(var3), labeller = as_labeller(var3_names)) + 
-      geom_ribbon(aes(ymin=lwr,ymax=upr,fill = as.factor(get(var2))),alpha=0.3, colour=NA) +
       scale_y_continuous("Community temperature Index") +
       scale_x_continuous(var1) +
       scale_color_manual("Habitat fragmentation", labels = var2_names, values=col.var2) +
