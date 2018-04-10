@@ -166,6 +166,67 @@ sp_site_occupancy_trend <- function(data){
 }
 
 
+sp_site_occupancy_trend.predict <- function(data){
+  res <- c()
+  for(i in 1:length(unique(data$Site))){
+    cat(paste("\r",round(i / length(unique(data$Site)), 2)*100,"%"))
+    
+    data.temp <- subset(data, data$Site == unique(data$Site)[i])
+    
+    for(j in 1:length(unique(data.temp$Species))){
+      
+      data.temp.temp <- subset(data.temp, data.temp$Species == unique(data.temp$Species)[j])
+      m <- glm(n ~ Year ,
+               family = binomial, 
+               data = data.temp.temp)
+      
+      pred <- predict(m, type = "response", newdata = data.frame(Year = c(min(data.temp.temp$Year), max(data.temp.temp$Year))))
+      
+      res.temp <- cbind.data.frame(Site = unique(data$Site)[i], 
+                                   Species = unique(data.temp$Species)[j], 
+                                   pred.then = pred[1],
+                                   pred.now = pred[2],
+                                   nYear = length(unique(data.temp.temp$Year)))
+      cat(".")
+      res <- rbind.data.frame(res, res.temp)
+    }
+  }
+}
+
+
+sp_site_colExt <- function(data, lwr, upr){
+  res <- c()
+  
+  for(i in 1:length(unique(data$Site))){
+    cat(paste("\r",round(i / length(unique(data$Site)), 2)*100,"%"))
+    
+    data.temp <- subset(data, data$Site == unique(data$Site)[i])
+    
+    for(j in 1:length(unique(data.temp$Species))){
+
+      if(pred[1] > lwr & pred[2] < upr){
+        res.temp <- cbind.data.frame(Site = unique(data$Site)[i], Species = unique(data.temp$Species)[j], 
+                                     Colonisation = 0,
+                                     Extinction = 1,
+                                     nYear = unique(data.temp.temp$nYear))
+      } else if(pred[1] < lwr & pred[2] > upr){
+        res.temp <- cbind.data.frame(Site = unique(data$Site)[i], Species = unique(data.temp$Species)[j], 
+                                     Colonisation = 1,
+                                     Extinction = 0,
+                                     nYear = unique(data.temp.temp$nYear))
+      } else {
+        res.temp <- cbind.data.frame(Site = unique(data$Site)[i], Species = unique(data.temp$Species)[j], 
+                                     Colonisation = 0,
+                                     Extinction = 0,
+                                     nYear = unique(data.temp.temp$nYear))
+      }
+      res <- rbind.data.frame(res, res.temp)
+    }
+  }
+  return(res)
+}
+
+
 turnover2 <- function(dat){
   output <- c()
   for(i in 1:length(unique(dat$Site))){
