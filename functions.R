@@ -191,41 +191,15 @@ sp_site_occupancy_trend.predict <- function(data){
       res <- rbind.data.frame(res, res.temp)
     }
   }
+  return(res)
 }
 
 
 sp_site_colExt <- function(data, lwr, upr){
-  res <- c()
-  
-  for(i in 1:length(unique(data$Site))){
-    cat(paste("\r",round(i / length(unique(data$Site)), 2)*100,"%"))
-    
-    data.temp <- subset(data, data$Site == unique(data$Site)[i])
-    
-    for(j in 1:length(unique(data.temp$Species))){
-
-      if(pred[1] > lwr & pred[2] < upr){
-        res.temp <- cbind.data.frame(Site = unique(data$Site)[i], Species = unique(data.temp$Species)[j], 
-                                     Colonisation = 0,
-                                     Extinction = 1,
-                                     nYear = unique(data.temp.temp$nYear))
-      } else if(pred[1] < lwr & pred[2] > upr){
-        res.temp <- cbind.data.frame(Site = unique(data$Site)[i], Species = unique(data.temp$Species)[j], 
-                                     Colonisation = 1,
-                                     Extinction = 0,
-                                     nYear = unique(data.temp.temp$nYear))
-      } else {
-        res.temp <- cbind.data.frame(Site = unique(data$Site)[i], Species = unique(data.temp$Species)[j], 
-                                     Colonisation = 0,
-                                     Extinction = 0,
-                                     nYear = unique(data.temp.temp$nYear))
-      }
-      res <- rbind.data.frame(res, res.temp)
-    }
-  }
+  res <- data %>% mutate(Colonisation = ifelse(pred.then < lwr & pred.now > upr, 1, 0),
+                          Extinction = ifelse(pred.then > lwr & pred.now < upr, 1, 0))
   return(res)
 }
-
 
 turnover2 <- function(dat){
   output <- c()
