@@ -22,12 +22,6 @@ butterflies.data.abundance <- as.tbl(fread("../Data/cti_butterflies_data.csv")) 
 butterflies.data.abundance <- butterflies.data.abundance %>% 
   mutate(gridCell50 = ifelse(country == "NL", paste0(gridCell50, "_NL"), paste0(gridCell50, "_FIN")))
 
-ggplot(butterflies.data.presence %>% dplyr:::filter(PLAND < .95 & PLAND > .05) %>% group_by(country, Scale, Habitat) %>%
-         distinct(), aes(y = CLUMPY, x = PLAND, color =country)) + 
-  geom_point(alpha = .3) + facet_wrap( ~ Scale, labeller = label_wrap) + 
-  scale_color_manual("Country", values = c("#00008B", "#BDB76B"), labels = c("Finland", "Netherlands")) + 
-  scale_y_continuous("Habitat clumpiness") + scale_x_continuous("% Semi-natural habitat")
-
 
 #########################################
 ## prepare data for landscape analysis ##
@@ -40,8 +34,8 @@ butterflies.data.abundance <- butterflies.data.abundance %>% dplyr:::filter(PLAN
 ## standardize ##
 butterflies.data.presence <- stdize(butterflies.data.presence, prefix = F, omit.cols= c("cti", "gridCell50", "Scale"))
 butterflies.data.abundance <- stdize(butterflies.data.abundance, prefix = F, omit.cols= c("cti", "gridCell50", "Scale"))
-scaleList <- list(scale = attr(butterflies.data.abundance, "scaled:scale")[c("Year", "CLUMPY", "PLAND")],
-                  center = attr(butterflies.data.abundance, "scaled:center")[c("Year", "CLUMPY", "PLAND")])
+scaleList <- list(scale = attr(butterflies.data.presence, "scaled:scale")[c("Year", "CLUMPY", "PLAND")],
+                  center = attr(butterflies.data.presence, "scaled:center")[c("Year", "CLUMPY", "PLAND")])
 
 ## select data 
 dat <- butterflies.data.presence

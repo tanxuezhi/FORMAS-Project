@@ -171,7 +171,7 @@ sp_site_occupancy_trend.predict <- function(data){
   for(i in 1:length(unique(data$Site))){
     cat(paste("\r",round(i / length(unique(data$Site)), 2)*100,"%"))
     
-    data.temp <- subset(data, data$Site == unique(data$Site)[i])
+    data.temp <- subset(data, data$Site == unique(data$Site)[i] & data$Year > 1991)
     
     for(j in 1:length(unique(data.temp$Species))){
       
@@ -194,12 +194,70 @@ sp_site_occupancy_trend.predict <- function(data){
   return(res)
 }
 
-
-sp_site_colExt <- function(data, lwr, upr){
-  res <- data %>% mutate(Colonisation = ifelse(pred.then < lwr & pred.now > upr, 1, 0),
-                          Extinction = ifelse(pred.then > lwr & pred.now < upr, 1, 0))
+sp_clim_sens <- function(data){
+  res <- c()
+  for(j in 1:length(unique(data$Species))){
+    print(unique(data$Species)[j])
+    data.temp <- data %>% dplyr:::filter(Species == unique(data$Species)[j])
+    m <- glmer(n ~ Year * PLAND * CLUMPY + X*Y + (Year|Site),
+               family = binomial, 
+               data = data.temp,
+               nAGQ=0,control = glmerControl(optimizer = "nloptwrap", 
+                                             optCtrl=list(maxfun=1e10),
+                                             calc.derivs = FALSE), verbose = F, na.action = na.fail)
+  d <- dredge(m, fixed = c("Year", "X", "Y", "X:Y", "PLAND", "CLUMPY", "CLUMPY:PLAND"))
+    
+    res <- rbind.data.frame(res,
+                            cbind.data.frame(Species = unique(data$Species)[j], 
+                                             as.data.frame(d)[1,]))
+  }
   return(res)
 }
+
+
+sp_site_Col <- function(data, site, lwr, upr, distance){
+  res <- c()
+  dat.temp <- left_join(data, butterflies %>% dplyr::select(2,3,5,6,16) %>% group_by(Site, Species) %>% summarise_all(first))
+  
+  for(i in 1:length(unique(dat.temp$Site))){
+    cat(paste(i, ""))
+    dat.temp.site <- subset(dat.temp, dat.temp$Site == unique(dat.temp$Site)[[i]])
+    dat.temp.surroundingSite <- dat.temp %>% dplyr::filter(abs(X - unique(dat.temp.site$X)) < distance & 
+                                                             abs(Y - unique(dat.temp.site$Y)) < distance &
+                                                             dat.temp$Site != unique(dat.temp$Site)[[i]])
+    if(length(setdiff(unique(dat.temp.surroundingSite$Species), unique(dat.temp.site$Species)))>0){
+      dat.temp.site <- rbind.data.frame(dat.temp.site[,1:5], cbind.data.frame(Site = unique(dat.temp.site$Site),
+                                                                              Species = setdiff(unique(dat.temp.surroundingSite$Species), unique(dat.temp.site$Species)),
+                                                                              pred.then = 0, pred.now = 0, nYear = unique(dat.temp.site$nYear)))
+    }else{
+      dat.temp.site <- dat.temp.site[,1:5]
+    }
+    dat.temp.site <- dat.temp.site %>% mutate(Colonisation = ifelse(pred.then < lwr & pred.now > upr, 1, 
+                                                                    ifelse(pred.then < lwr & pred.now < upr, 0, NA)))
+    
+    res <- rbind.data.frame(res, dat.temp.site)
+  }
+  return(subset(res, !is.na(res$Colonisation)))
+}
+
+
+sp_site_Ext <- function(data, lwr, upr){
+  res <- data %>% mutate(Extinction = ifelse(pred.then > upr & pred.now < lwr, 1, 
+                                             ifelse(pred.then > upr & pred.now > lwr, 0, NA)))
+  return(subset(res, !is.na(res$Extinction)))
+}
+
+
+sp_site_occTrend <- function(data, lwr, upr){
+  dat.occ.trend %>% group_by(country = ifelse(grepl("NL", Site), "NL", "FIN")) %>% complete(Species, Site, fill = list(pred.then = 0, pred.now = 0))
+  
+  res <- data %>% mutate(Trend = ifelse(pred.then > upr & pred.now < lwr, "Extinction", 
+                                        ifelse(pred.then > upr & pred.now > lwr, "Persistence", 
+                                               ifelse(pred.then < lwr & pred.now > upr, "Colonisation", "Absence"))))
+  
+  return(res)
+}
+
 
 turnover2 <- function(dat){
   output <- c()
@@ -266,54 +324,46 @@ predict_raster <- function(model, scaleList, n = 100){
   return(pred)
 }
 
-predict_raster2 <- function(model, scaleList, n = 100){
+predict_raster2 <- function(model, xvar, yvar, n = 100){
   require(alphahull)
   require(raster)
   
-  newdata <- expand.grid(X = median(model$frame$X), Y = median(model$frame$Y),
-                         STI_rel = c(- 1, 1), 
-                         PC11 =  c(model$frame[which.min(abs(model$frame$PC11 - (-1))),"PC11"],
-                                   model$frame[which.min(abs(model$frame$PC11 - 0)),"PC11"],
-                                   model$frame[which.min(abs(model$frame$PC11 - 1)),"PC11"]),
-                         Habitat = "Open",country = "NL", 
-                         PLAND = seq(min(model$frame$PLAND), max(model$frame$PLAND), 
-                                     length.out = n),
-                         CLUMPY = seq(min(model$frame$CLUMPY), max(model$frame$CLUMPY), 
-                                      length.out = n),
-                         Year = seq(min(model$frame$Year), max(model$frame$Year), 
-                                    length.out = 10))
+  newdata <- data.frame(X = median(model@frame$X), Y = median(model@frame$Y),
+                        STI_rel = median(model@frame$STI_rel), 
+                        PC1 = rep(c(-1,median(model@frame$STI_rel),1), each = n^2),
+                        PC3 = median(model@frame$PC3),
+                        PC4 = median(model@frame$PC4),
+                        Habitat = "Open", country = "NL", 
+                        PLAND = median(model@frame$PLAND),
+                        CLUMPY = median(model@frame$CLUMPY))
   
-  newdata <- newdata %>% mutate(PC12 = ifelse(PC11 == model$frame[which.min(abs(model$frame$PC11 - (-1))),"PC11"],
-                                              model$frame[which.min(abs(model$frame$PC11 - (-1))),"PC12"],
-                                              ifelse(PC11 == model$frame[which.min(abs(model$frame$PC11)),"PC11"],
-                                                     model$frame[which.min(abs(model$frame$PC11)),"PC12"],
-                                                     model$frame[which.min(abs(model$frame$PC11 - 1)),"PC12"])))
+  newdata <- cbind(newdata[,!names(newdata) %in% c(xvar, yvar)],
+                   expand.grid(seq(min(model@frame[,xvar]), max(model@frame[,xvar]), 
+                                   length.out = n), seq(min(model@frame[,yvar]), max(model@frame[,yvar]), 
+                                                        length.out = n)))
+  names(newdata)[c((length(names(newdata))-1), length(names(newdata)))] <- c(xvar, yvar)
+  
+  # newdata <- newdata %>% mutate(PC12 = ifelse(PC11 == model$frame[which.min(abs(model$frame$PC11 - (-1))),"PC11"],
+  #                                             model$frame[which.min(abs(model$frame$PC11 - (-1))),"PC12"],
+  #                                             ifelse(PC11 == model$frame[which.min(abs(model$frame$PC11)),"PC11"],
+  #                                                    model$frame[which.min(abs(model$frame$PC11)),"PC12"],
+  #                                                    model$frame[which.min(abs(model$frame$PC11 - 1)),"PC12"])))
   
   pred <- predict(model, newdata, re.form = NA, type = "response")
   pred <- cbind.data.frame(newdata, pred = pred)
-  pred <- pred %>% group_by(PLAND, CLUMPY, STI_rel, PC11, PC12) %>% 
-    mutate(Year = Year * scaleList$scale["Year"] + scaleList$center["Year"] ) %>%
-    do(trend = lm(pred ~ Year, data = .)) %>% tidy(trend) %>% dplyr::filter(term == "Year")
+  pred <- subset(pred, PC1 == median(model@frame$STI_rel))
   
-  ah <- ahull(alpha = 2.5, x = unique(model$frame[,c("PLAND", "CLUMPY")]))
+  ah <- ahull(alpha = 2.5, x = unique(model@frame[,c(xvar, yvar)]))
   ah <- a2shp(ah)
   
-  pred <- foreach(i = unique(pred$STI_rel), .combine = rbind) %:%
-    foreach(j = unique(pred$PC11), .combine = rbind) %do% {
-      pred_temp <- pred %>% dplyr::filter(STI_rel == i, PC11 == j)
-      res_pred <- rasterFromXYZ(pred_temp[,c("PLAND", "CLUMPY", "estimate")])
-      res_pred <- mask(res_pred, ah)
-      res_pred <- cbind.data.frame(STI_rel = i, PC1 = j, as.data.frame(rasterToPoints(res_pred)))
-      return(res_pred)
-    }
+  pred <- rasterFromXYZ(pred[,c(xvar, yvar, "pred")])
+  pred <- mask(pred, ah)
+  pred <- as.data.frame(rasterToPoints(pred))
   
-  pred$x <- pred$x * scaleList$scale["PLAND"] + scaleList$center["PLAND"]
-  pred$y <- pred$y * scaleList$scale["CLUMPY"] + scaleList$center["CLUMPY"]
-  pred$STI_rel <- ifelse(pred$STI_rel == -1, "Low STI", "High STI")
-  pred$PC1 <- ifelse(pred$PC1 == model$frame[which.min(abs(model$frame$PC11 - (-1))),"PC11"], 
-                     "Low disperal", 
-                     ifelse(pred$PC1 == model$frame[which.min(abs(model$frame$PC11)),"PC11"],
-                            "Medium dispersal", "High disperal"))
+  pred$x <- pred$x * scaleList$scale[xvar] + scaleList$center[xvar]
+  pred$y <- pred$y * scaleList$scale[yvar] + scaleList$center[yvar]
+  
+  names(pred)[1:2] <- c(xvar, yvar)
   
   return(pred)
 }
