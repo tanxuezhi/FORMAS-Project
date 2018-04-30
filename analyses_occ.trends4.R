@@ -7,26 +7,25 @@ library(doFuture)
 source("functions.R")
 
 ## load data ##
-# butterflies.cti.presence <- as.tbl(fread("../Data/cti_butterflies_data.csv")) %>% dplyr::filter(type == "Presence")
-# butterflies <- bind_rows(read_csv("../Data/pres_abs_FIN_data.csv"), read_csv("../Data/pres_abs_NL_data.csv")) %>% 
-#   dplyr:::filter(PLAND <= .95 & PLAND >= .05)
-# 
-# butterflies <- left_join(butterflies %>% group_by(coords = paste(X,Y)), 
-#                          butterflies.cti.presence %>% group_by(coords = paste(X,Y)) %>% summarise(cti = mean(cti)),
-#           by = "coords")
-# 
-# butterflies <- butterflies %>% mutate(STI_rel = cti - STI) %>% 
-#   dplyr::filter(!is.na(STI)) %>% 
-#   mutate(gridCell50 = ifelse(country == "NL", paste0(gridCell50, "_NL"), paste0(gridCell50, "_FIN")))
-# butterflies <- butterflies %>% as.data.frame %>% polypoly::poly_add_columns(.col = PC1, degree = 2) %>% as.tbl
-# 
-# write_csv(butterflies, "C:/Local Folder (c)/butterflies_occ.csv")
+butterflies.cti.presence <- as.tbl(fread("../Data/cti_butterflies_data.csv")) %>% dplyr::filter(type == "Presence")
+butterflies <- bind_rows(read_csv("../Data/pres_abs_FIN_data.csv"), read_csv("../Data/pres_abs_NL_data.csv"))
 
-# butterflies <- butterflies %>% stdize(., prefix = F, omit.cols = c("n", "gridCell50", "Scale")) 
-# scaleList <- list(scale = attr(butterflies, "scaled:scale")[c("Year", "CLUMPY", "PLAND")],
-#                   center = attr(butterflies, "scaled:center")[c("Year", "CLUMPY", "PLAND")])
-# 
-# write_csv(butterflies, "C:/Local Folder (c)/butterflies_occ_std.csv")
+butterflies <- left_join(butterflies %>% group_by(coords = paste(X,Y)),
+                         butterflies.cti.presence %>% group_by(coords = paste(X,Y)) %>% summarise(cti = mean(cti)),
+          by = "coords")
+
+butterflies <- butterflies %>% mutate(STI_rel = cti - STI) %>%
+  dplyr::filter(!is.na(STI)) %>%
+  mutate(gridCell50 = ifelse(country == "NL", paste0(gridCell50, "_NL"), paste0(gridCell50, "_FIN")))
+butterflies <- butterflies %>% as.data.frame %>% polypoly::poly_add_columns(.col = PC1, degree = 2) %>% as.tbl
+
+write_csv(butterflies, "C:/Local Folder (c)/butterflies_occ.csv")
+
+butterflies <- butterflies %>% stdize(., prefix = F, omit.cols = c("n", "gridCell50", "Scale"))
+scaleList <- list(scale = attr(butterflies, "scaled:scale")[c("Year", "CLUMPY", "PLAND")],
+                  center = attr(butterflies, "scaled:center")[c("Year", "CLUMPY", "PLAND")])
+
+write_csv(butterflies, "C:/Local Folder (c)/butterflies_occ_std.csv")
 
 butterflies <- as.tbl(fread("C:/Local Folder (c)/butterflies_occ_std.csv"))
 scaleList <- structure(list(scale = structure(c(7.76768830494924, 0.054126736142142,0.213524890144323),

@@ -205,7 +205,7 @@ sp_clim_sens <- function(data){
                nAGQ=0,control = glmerControl(optimizer = "nloptwrap", 
                                              optCtrl=list(maxfun=1e10),
                                              calc.derivs = FALSE), verbose = F, na.action = na.fail)
-  d <- dredge(m, fixed = c("Year", "X", "Y", "X:Y", "PLAND", "CLUMPY", "CLUMPY:PLAND"))
+    d <- dredge(m, fixed = c("Year", "X", "Y", "X:Y", "PLAND", "CLUMPY", "CLUMPY:PLAND"))
     
     res <- rbind.data.frame(res,
                             cbind.data.frame(Species = unique(data$Species)[j], 
@@ -249,11 +249,12 @@ sp_site_Ext <- function(data, lwr, upr){
 
 
 sp_site_occTrend <- function(data, lwr, upr){
-  dat.occ.trend %>% group_by(country = ifelse(grepl("NL", Site), "NL", "FIN")) %>% complete(Species, Site, fill = list(pred.then = 0, pred.now = 0))
+  data <- data %>% group_by(country = ifelse(grepl("NL", Site), "NL", "FIN")) %>% complete(Species, Site, fill = list(pred.then = 0, pred.now = 0))
   
   res <- data %>% mutate(Trend = ifelse(pred.then > upr & pred.now < lwr, "Extinction", 
                                         ifelse(pred.then > upr & pred.now > lwr, "Persistence", 
-                                               ifelse(pred.then < lwr & pred.now > upr, "Colonisation", "Absence"))))
+                                               ifelse(pred.then < lwr & pred.now > upr, "Colonisation", 
+                                                      ifelse(pred.then < lwr & pred.now < upr, "No colonisation", "Undetermined")))))
   
   return(res)
 }
@@ -324,7 +325,7 @@ predict_raster <- function(model, scaleList, n = 100){
   return(pred)
 }
 
-predict_raster2 <- function(model, xvar, yvar, n = 100){
+predict_raster2 <- function(model, xvar, yvar, cond = NULL, n = 100){
   require(alphahull)
   require(raster)
   
@@ -343,6 +344,10 @@ predict_raster2 <- function(model, xvar, yvar, n = 100){
                                                         length.out = n)))
   names(newdata)[c((length(names(newdata))-1), length(names(newdata)))] <- c(xvar, yvar)
   
+  if(!is.null(cond)){
+    newdata[,names(cond)] <- cond[[1]]
+  }
+  
   # newdata <- newdata %>% mutate(PC12 = ifelse(PC11 == model$frame[which.min(abs(model$frame$PC11 - (-1))),"PC11"],
   #                                             model$frame[which.min(abs(model$frame$PC11 - (-1))),"PC12"],
   #                                             ifelse(PC11 == model$frame[which.min(abs(model$frame$PC11)),"PC11"],
@@ -351,7 +356,7 @@ predict_raster2 <- function(model, xvar, yvar, n = 100){
   
   pred <- predict(model, newdata, re.form = NA, type = "response")
   pred <- cbind.data.frame(newdata, pred = pred)
-  pred <- subset(pred, PC1 == median(model@frame$STI_rel))
+  # pred <- subset(pred, PC1 == median(model@frame$STI_rel))
   
   ah <- ahull(alpha = 2.5, x = unique(model@frame[,c(xvar, yvar)]))
   ah <- a2shp(ah)

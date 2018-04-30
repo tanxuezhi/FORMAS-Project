@@ -28,8 +28,8 @@ butterflies.data.abundance <- butterflies.data.abundance %>%
 #########################################
 
 ## select only sites with .05 < %SNH < .95
-butterflies.data.presence <- butterflies.data.presence %>% dplyr:::filter(PLAND <= .95 & PLAND >= .05)
-butterflies.data.abundance <- butterflies.data.abundance %>% dplyr:::filter(PLAND <= .95 & PLAND >= .05)
+# butterflies.data.presence <- butterflies.data.presence %>% dplyr:::filter(PLAND <= .95 & PLAND >= .05)
+# butterflies.data.abundance <- butterflies.data.abundance %>% dplyr:::filter(PLAND <= .95 & PLAND >= .05)
 
 ## standardize ##
 butterflies.data.presence <- stdize(butterflies.data.presence, prefix = F, omit.cols= c("cti", "gridCell50", "Scale"))
