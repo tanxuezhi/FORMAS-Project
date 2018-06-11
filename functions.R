@@ -249,7 +249,7 @@ sp_site_Ext <- function(data, lwr, upr){
 
 
 sp_site_occTrend <- function(data, lwr, upr){
-  data <- data %>% group_by(country = ifelse(grepl("NL", Site), "NL", "FIN")) %>% complete(Species, Site, fill = list(pred.then = 0, pred.now = 0))
+  data <- data %>% group_by(gridCell50) %>% complete(Species, Site, fill = list(pred.then = 0, pred.now = 0))
   
   res <- data %>% mutate(Trend = ifelse(pred.then > upr & pred.now < lwr, "Extinction", 
                                         ifelse(pred.then > upr & pred.now > lwr, "Persistence", 
@@ -260,60 +260,28 @@ sp_site_occTrend <- function(data, lwr, upr){
 }
 
 
-turnover2 <- function(dat){
-  output <- c()
-  for(i in 1:length(unique(dat$Site))){
-    data.temp <- dat %>% dplyr::filter(Site == unique(dat$Site)[i])
-    print(paste(i, "/", length(unique(dat$Site))))
-    if(length(unique(data.temp$Year)) > 1){
-      for(j in 2:length(unique(data.temp$Year))){
-        
-        nSp <- union(data.temp %>% ungroup () %>% dplyr::filter(Year == unique(data.temp$Year)[j]) %>% dplyr::select(Species),
-                     data.temp %>% ungroup () %>% dplyr::filter(Year == unique(data.temp$Year)[j-1]) %>% dplyr::select(Species)) %>% 
-          summarise(n = length(unique(Species)))
-        
-        nSp.dis <- setdiff(data.temp %>% ungroup () %>% dplyr::filter(Year == unique(data.temp$Year)[j]) %>% dplyr::select(Species),
-                           data.temp %>% ungroup () %>% dplyr::filter(Year == unique(data.temp$Year)[j-1])%>% dplyr::select(Species)) %>% 
-          summarise(n = length(unique(Species)))
-        
-        nSp.app <- setdiff(data.temp %>% ungroup () %>% dplyr::filter(Year == unique(data.temp$Year)[j-1]) %>% dplyr::select(Species),
-                           data.temp %>% ungroup () %>% dplyr::filter(Year == unique(data.temp$Year)[j]) %>% dplyr::select(Species)) %>% 
-          summarise(n = length(unique(Species)))
-        
-        output <- rbind.data.frame(output,
-                                   cbind.data.frame(Site = unique(dat$Site)[i], Year = unique(data.temp$Year)[j], 
-                                                    total.turnover = as.vector((nSp.dis + nSp.app)/nSp)$n,
-                                                    appearance = as.vector(nSp.app / nSp)$n,
-                                                    disappearance = as.vector(nSp.dis / nSp)$n, 
-                                                    total.species = as.vector(nSp)$n))
-      }
-    }
-  }
-  return(output)
-}
-
 
 predict_raster <- function(model, scaleList, n = 100){
   require(alphahull)
   require(raster)
   
-  newdata <- cbind.data.frame(X = median(model$data$X), Y = median(model$data$Y), Habitat = c("Open", "Forest"),
-                              expand.grid(PLAND = seq(min(model$data$PLAND), max(model$data$PLAND), 
+  newdata <- cbind.data.frame(X = median(model@frame$X), Y = median(model@frame$Y), Habitat = c("Open", "Forest"),
+                              expand.grid(PLAND = seq(min(model@frame$PLAND), max(model@frame$PLAND), 
                                                       length.out = n),
-                                          CLUMPY = seq(min(model$data$CLUMPY), max(model$data$CLUMPY), 
+                                          CLUMPY = seq(min(model@frame$CLUMPY), max(model@frame$CLUMPY), 
                                                        length.out = n),
-                                          Year = seq(min(model$data$Year), max(model$data$Year), 
+                                          Year = seq(min(model@frame$Year), max(model@frame$Year), 
                                                      length.out = 10)))
   newdata$Habitat <- as.character(newdata$Habitat)
   
-  pred <- predict(model, newdata, level = 0)
+  pred <- predict(model, newdata, re.form = NA)
   pred <- cbind.data.frame(newdata, pred = pred) %>% dplyr::filter(Habitat == "Open")
   pred <- pred %>% group_by(PLAND, CLUMPY) %>% 
     mutate(Year = Year * scaleList$scale["Year"] + scaleList$center["Year"]) %>%
     do(trend = lm(pred ~ Year, data = .)) %>% tidy(trend) %>% dplyr::filter(term == "Year")
   pred <- rasterFromXYZ(pred[,c("PLAND", "CLUMPY", "estimate")])
   
-  ah <- ahull(alpha = 2.5, x = unique(model$data[,c("PLAND", "CLUMPY")]))
+  ah <- ahull(alpha = 2.5, x = unique(model@frame[,c("PLAND", "CLUMPY")]))
   ah <- a2shp(ah)
   
   pred <- mask(pred, ah)
@@ -331,7 +299,7 @@ predict_raster2 <- function(model, xvar, yvar, cond = NULL, n = 100){
   
   newdata <- data.frame(X = median(model@frame$X), Y = median(model@frame$Y),
                         STI_rel = median(model@frame$STI_rel), 
-                        PC1 = rep(c(-1,median(model@frame$STI_rel),1), each = n^2),
+                        PC1 = rep(c(-1,median(model@frame$PC1),1), each = n^2),
                         PC3 = median(model@frame$PC3),
                         PC4 = median(model@frame$PC4),
                         Habitat = "Open", country = "NL", 

@@ -1,8 +1,12 @@
+library(tidyverse)
+library(raster)
+library(data.table)
+library(rgeos)
+
 #####################
 ### Illustrations ###
 #####################
 source("functions.R")
-library(rgeos)
 
 ##############
 ## data set ##
@@ -10,8 +14,15 @@ library(rgeos)
 
 butterflies.data.presence <- as.tbl(fread("../Data/cti_butterflies_data.csv")) %>% dplyr::filter(type == "Presence")
 butterflies.data.presence %>% dplyr::filter(Scale == 50000) %>% group_by(country) %>% summarise(n = length(unique(Site)))
-butterflies.data.presence %>% dplyr::filter(Scale == 50000) %>% group_by(country) %>% summarise(first = min(Year))
+butterflies.data.presence %>% dplyr::filter(Scale == 50000) %>% group_by(country) %>% summarise(first = min(Year), last = max(Year))
 
+butterflies.data.presence %>% dplyr::filter(Scale == 50000) %>% group_by(country, Site) %>% summarise(n = length(unique(Year))) %>%
+  group_by(country) %>%
+  summarise(mean.noYear = mean(n), sd.noYear = sd(n))
+
+butterflies.data.presence %>% dplyr::filter(Scale == 50000) %>% group_by(country, Year) %>% summarise(n = length(unique(Site))) %>%
+  group_by(country) %>%
+  summarise(mean.noSite = mean(n), sd.noSite = sd(n))
 
 
 data <- butterflies.data.presence %>% dplyr::filter(Scale == 50000) %>% 
@@ -60,11 +71,105 @@ buf4 <- gBuffer(spgeom = SpatialPoints(pt4), width = 20000)
 land4 <- raster::mask(crop(SNH_open, buf4), buf4)
 
 # plot
-par(mfrow=c(2,2))
+par(mfrow=c(2,2), mar = c(1,1,1,1))
 plot(land2, legend = F, axes = F, box = F)
 plot(land1, legend = F, axes = F, box = F)
 plot(land4, legend = F, axes = F, box = F)
 plot(land3, legend = F, axes = F, box = F)
+
+
+######################
+### show CTI trend ###
+######################
+
+png("../CTI_trend.png", width = 7, height = 4, res = 1200, units = "in")
+par(mfrow=c(1,2))
+
+m.FIN <- lmer(cti ~ as.factor(Year) + (1|gridCell50/Site), 
+              data = butterflies.data.presence %>% dplyr:::filter(Scale == 50000, country == "FIN"))
+m.FIN2 <- lmer(cti ~ Year + (1|gridCell50/Site), 
+               data = butterflies.data.presence %>% dplyr:::filter(Scale == 50000, country == "FIN"))
+
+plot(emmean ~ Year, data = emmeans(m.FIN, ~ Year), type = "o", pch = 16, ylab = "Community temperature index")
+abline(fixef(m.FIN2)[1], fixef(m.FIN2)[2])
+
+m.NL <- lmer(cti ~ as.factor(Year) + (1|gridCell50/Site), 
+             data = butterflies.data.presence %>% dplyr:::filter(Scale == 50000, country == "NL"))
+m.NL2 <- lmer(cti ~ Year + (1|gridCell50/Site), 
+              data = butterflies.data.presence %>% dplyr:::filter(Scale == 50000, country == "NL"))
+
+plot(emmean ~ Year, data = emmeans(m.NL, ~ Year), type = "o", pch = 16, ylab = "Community temperature index")
+abline(fixef(m.NL2)[1], fixef(m.NL2)[2])
+
+dev.off()
+
+
+###########################
+### show classification ###
+###########################
+par(mfrow=c(2,2))
+
+dat.temp <- butterflies %>% dplyr::filter(Scale == 50000, Site == "1008_NL", Year > 1991)
+dat.temp2 <- dat.temp %>% dplyr::filter(Species == "Pararge aegeria")
+
+m <- glm(n ~ Year, family = binomial, dat = dat.temp2)
+visreg(m, xvar = "Year", scale = "response", ylim = c(0,1), band = T, rug = F, main = "Colonisation")
+points(n ~ Year, dat = dat.temp2)
+
+pred <- predict(m, type = "response", newdata = data.frame(Year = c(min(dat.temp2$Year), max(dat.temp2$Year))))
+abline(h = pred[[1]], col = "red")
+abline(h = pred[[2]], col = "red")
+
+abline(h = .8, col = "blue", lty = 2)
+abline(h = .2, col = "blue", lty = 2)
+
+
+
+dat.temp <- butterflies %>% dplyr::filter(Scale == 50000, Site == "101_NL", Year > 1991)
+dat.temp2 <- dat.temp %>% dplyr::filter(Species == "Polyommatus icarus")
+
+m <- glm(n ~ Year, family = binomial, dat = dat.temp2)
+visreg(m, xvar = "Year", scale = "response", ylim = c(0,1), band = T, rug = F, main = "Extinction")
+points(n ~ Year, dat = dat.temp2)
+
+pred <- predict(m, type = "response", newdata = data.frame(Year = c(min(dat.temp2$Year), max(dat.temp2$Year))))
+abline(h = pred[[1]], col = "red")
+abline(h = pred[[2]], col = "red")
+
+abline(h = .8, col = "blue", lty = 2)
+abline(h = .2, col = "blue", lty = 2)
+
+
+
+dat.temp <- butterflies %>% dplyr::filter(Scale == 50000, Site == "33_FIN", Year > 1991)
+dat.temp2 <- dat.temp %>% dplyr::filter(Species == "Argynnis aglaja")
+
+m <- glm(n ~ Year, family = binomial, dat = dat.temp2)
+visreg(m, xvar = "Year", scale = "response", ylim = c(0,1), band = T, rug = F, main = "No colonisation")
+points(n ~ Year, dat = dat.temp2)
+
+pred <- predict(m, type = "response", newdata = data.frame(Year = c(min(dat.temp2$Year), max(dat.temp2$Year))))
+abline(h = pred[[1]], col = "red")
+abline(h = pred[[2]], col = "red")
+
+abline(h = .8, col = "blue", lty = 2)
+abline(h = .2, col = "blue", lty = 2)
+
+
+
+dat.temp <- butterflies %>% dplyr::filter(Scale == 50000, Site == "1008_NL", Year > 1991)
+dat.temp2 <- dat.temp %>% dplyr::filter(Species == "Pieris napi")
+
+m <- glm(n ~ Year, family = binomial, dat = dat.temp2)
+visreg(m, xvar = "Year", scale = "response", ylim = c(0,1), band = T, rug = F, main = "Persistence")
+points(n ~ Year, dat = dat.temp2)
+
+pred <- predict(m, type = "response", newdata = data.frame(Year = c(min(dat.temp2$Year), max(dat.temp2$Year))))
+abline(h = pred[[1]], col = "red")
+abline(h = pred[[2]], col = "red")
+
+abline(h = .8, col = "blue", lty = 2)
+abline(h = .2, col = "blue", lty = 2)
 
 
 
