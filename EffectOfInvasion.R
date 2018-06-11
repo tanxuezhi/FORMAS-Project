@@ -32,36 +32,47 @@ for(i in unique(data2$Species_Faunaeur)){
   
   dat.temp <- data2 %>% filter(Species_Faunaeur == i) %>% ungroup()
   
-    data2_invMap <- data2  %>% group_by(Site) %>% filter(Species_Faunaeur == "Araschnia levana") %>% 
-      select(-1) %>% summarise(inv.Year = min(Year)) %>%
-      right_join(dat.temp, by = c("Site")) %>% filter(Species_Faunaeur == i) %>%
-      mutate(Invasion = ifelse(Year > inv.Year, "Yes", "No"),
-             Year = Year - min(Year)) %>% 
-      mutate(Invasion = factor(ifelse(is.na(Invasion), "No", Invasion), levels = c("No", "Yes")))
+  data2_invMap <- data2  %>% group_by(Site) %>% filter(Species_Faunaeur == "Araschnia levana") %>% 
+    select(-1) %>% summarise(inv.Year = min(Year)) %>%
+    right_join(dat.temp, by = c("Site")) %>% filter(Species_Faunaeur == i) %>%
+    mutate(Invasion = ifelse(Year > inv.Year, "Yes", "No"),
+           Year = Year - min(Year)) %>% 
+    mutate(Invasion = factor(ifelse(is.na(Invasion), "No", Invasion), levels = c("No", "Yes")))
+  
+  
+  if(length(unique(data2_invMap$Invasion)) > 1 & length(unique(data2_invMap$Individuals)) > 1 & 
+     length(unique(data2_invMap$Invasion)) * length(unique(data2_invMap$Site)) < nrow(data2_invMap)){
     
+    m <- glmer(Individuals ~ Year*Invasion + (Year|Site), family = "poisson", 
+               data = data2_invMap,
+               nAGQ=0,control = glmerControl(optimizer = "nloptwrap", 
+                                             optCtrl=list(maxfun=1e10),
+                                             calc.derivs = FALSE), verbose = F)
     
-    if(length(unique(data2_invMap$Invasion)) > 1 & length(unique(data2_invMap$Individuals)) > 1 & 
-       length(unique(data2_invMap$Invasion)) * length(unique(data2_invMap$Site)) < nrow(data2_invMap)){
+    trends <- as.data.frame(emtrends(m, ~ Invasion, "Year", transform = "response"))
     
-        m <- glmer(Individuals ~ Year*Invasion + (Year|Site), family = "poisson", 
-                   data = data2_invMap,
-                   nAGQ=0,control = glmerControl(optimizer = "nloptwrap", 
-                                                 optCtrl=list(maxfun=1e10),
-                                                 calc.derivs = FALSE), verbose = F)
-      
-      trends <- as.data.frame(emtrends(m, ~ Invasion, "Year", transform = "response"))
-      
-      res <- rbind.data.frame(res, cbind.data.frame(Species = i, 
-                                                    nData = length(unique(data2_invMap$Invasion)) * length(unique(data2_invMap$Site)), 
-                                                    trends))
-    }
+    res <- rbind.data.frame(res, 
+                            cbind.data.frame(Species = i, 
+                                             nData = length(unique(data2_invMap$Invasion)) * length(unique(data2_invMap$Site)), 
+                                             trends))
+  }
 }
 
-ggplot(res, aes(y = Year.trend, x = Invasion)) + geom_point() + 
+ggplot(res %>% filter(nData > 50), aes(y = Year.trend, x = Invasion)) + geom_point() + 
   geom_errorbar(aes(ymin = Year.trend- SE, ymax = Year.trend + SE))
 
-mm <- lmer(Year.trend ~ Invasion + (1|Species), weight = 1/nData, data  = res%>%filter(nData > 50))
+left_join(as.tbl(res) %>% filter(nData > 50, Invasion == "No") %>% select(1,2,4), 
+          as.tbl(res) %>% filter(nData > 50, Invasion == "Yes") %>% select(1,4), by = c("Species")) %>%
+  mutate(effectInvasion = Year.trend.x - Year.trend.y) %>%
+  arrange(effectInvasion) %>% mutate(Species = factor(Species, unique(Species))) %>%
+  ggplot(aes(x = effectInvasion, y = Species)) + geom_point() + geom_vline(xintercept = 0)
+
+
+mm <- lmer(Year.trend ~ Invasion + (1|Species), weight = 1/nData, data  = res %>% filter(nData > 50))
+car::qqPlot(resid(mm))
+
 summary(mm)
+
 visreg(mm, xvar = "Invasion", scale = "response")
 
 
