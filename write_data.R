@@ -1,6 +1,7 @@
 library(rio)
 library(sp)
 library(raster)
+library(tidyverse)
 
 ##############################################
 ##############################################
@@ -84,6 +85,84 @@ cti_butterflies <- cti_butterflies %>% ungroup()  %>% dplyr::select(-coords)
 
 # merge and write
 write_csv(cti_butterflies, "../Data/cti_butterflies_data.csv")
+
+
+
+#######################
+###  alternatively  ###
+### same definition ###
+###  for all sites  ###
+#######################
+
+# sites data
+sites_NL <- read_csv(file = "../Data/Butterflies - Netherlands/Sites_NL_ETRS89_landcover.csv")
+sites_FIN <- read_csv(file = "../Data/Butterflies - Finland/Sites_FIN_ETRS89_landcover.csv")
+
+# fragmentation data
+frag_data <- read_csv("../Connectivity/Fragmentation/Frag_indices_Allhab.csv") %>% filter(Habitat == "Generalist")
+
+# temperature data
+temp_data_NL <- read_csv("../Data/temperature_NL.csv")
+temp_data_FIN <- read_csv("../Data/temperature_FIN.csv")
+
+#dbMEM data
+# dbMEM_data_NL <- read_csv("../Data/Butterflies - Netherlands/dbMEM.NL.csv")
+# dbMEM_data_FIN <- read_csv("../Data/Butterflies - Finland/dbMEM.FIN.csv")
+
+sites_NL <- left_join(sites_NL, lc_class, by = c("Landcover" = "CLC_CODE"))
+sites_NL <- left_join(sites_NL, temp_data_NL, by = c("Site"))
+sites_NL <- sites_NL %>% dplyr:::select(-GRID_CODE,-RGB)
+
+sites_FIN <- left_join(sites_FIN, lc_class, by = c("Landcover" = "GRID_CODE"))
+sites_FIN <- left_join(sites_FIN, temp_data_FIN, by = c("Site"))
+sites_FIN <- sites_FIN %>% dplyr:::select(-CLC_CODE,-RGB)
+
+# cti data
+# Abundance-weighted #
+cti_AB_NL <- read.csv2("../Data/Butterflies - Netherlands/cti_site_year_abundance_2017-05-19.csv", dec = ".")[,-3]
+cti_AB_NL <- merge(cti_AB_NL, sites_NL, by.x = "Site", by.y = "Site")
+
+cti_AB_FIN <- read.csv("../Data/Butterflies - Finland/CTI_Abundance_FINLAND_1999-2016.csv", dec = ".")
+cti_AB_FIN <- merge(cti_AB_FIN, sites_FIN, by.x = "Site", by.y = "Site")
+
+cti_AB_butterflies <- as.tbl(bind_rows(cbind.data.frame(cti_AB_NL, country = "NL"), cbind.data.frame(cti_AB_FIN, country = "FIN")))
+cti_AB_butterflies$Site <- paste0(cti_AB_butterflies$Site, "_", cti_AB_butterflies$country)
+
+# P/A #
+cti_PA_NL <- read.csv2("../Data/Butterflies - Netherlands/cti_site_year_presence_2017-05-19.csv", dec = ".")[,-3]
+cti_PA_NL <- merge(cti_PA_NL, sites_NL, by.x = "Site", by.y = "Site")
+
+cti_PA_FIN <- read.csv("../Data/Butterflies - Finland/CTI_presence_FINLAND_1999-2016.csv", dec = ".")
+cti_PA_FIN <- merge(cti_PA_FIN, sites_FIN, by.x = "Site", by.y = "Site")
+
+cti_PA_butterflies <- as.tbl(bind_rows(cbind.data.frame(cti_PA_NL, country = "NL"), cbind.data.frame(cti_PA_FIN, country = "FIN")))
+cti_PA_butterflies$Site <- paste0(cti_PA_butterflies$Site, "_", cti_PA_butterflies$country)
+
+# add grid cell (50x50km)
+but.pts <- SpatialPoints(cti_AB_butterflies[,c("X", "Y")])
+but.r <- raster(ext = extent(but.pts)*1.1, resolution = 50000)
+values(but.r) <- c(1:ncell(but.r))
+gridCell50 <- extract(but.r, but.pts)
+
+cti_AB_butterflies <- bind_cols(cti_AB_butterflies, gridCell50 = gridCell50)
+cti_PA_butterflies <- bind_cols(cti_PA_butterflies, gridCell50 = gridCell50)
+
+cti_butterflies <- as.tbl(bind_rows(cbind.data.frame(type = "Presence", cti_PA_butterflies), cbind.data.frame(type = "Abundance", cti_AB_butterflies)))
+
+# add fragmentation
+cti_butterflies <- left_join(cti_butterflies %>% ungroup(), frag_data) 
+
+cti_butterflies <- cti_butterflies %>% group_by(coords = paste(X, Y), Year, type, Scale) %>% summarise_all(first)
+
+cti_butterflies %>% group_by(Site, Year, type, Scale) %>% summarise(n = n()) %>% ungroup() %>% summarise(max(n))
+cti_butterflies %>% group_by(coords, Year, type, Scale) %>% summarise(n = n()) %>% ungroup() %>% summarise(max(n))
+
+cti_butterflies <- cti_butterflies %>% ungroup()  %>% dplyr::select(-coords)
+
+# merge and write
+write_csv(cti_butterflies, "../Data/cti_butterflies_data_generalistLanduse.csv")
+
+
 
 #############
 ### birds ###
