@@ -314,7 +314,7 @@ visreg(m.ext, xvar = "CLUMPY", by  ="PLAND", scale = "response", rug = F, breaks
        xtrans = function(x){x * scaleList$scale["CLUMPY"] + scaleList$center["CLUMPY"]}, ylim = c(0,.5),
        xlab = "", ylab = "", legend = F, fill.par=list(col=c("#EEC90060", "#EEC90060")),ann = F, axes = F,
        line.par=list(col=c("#EEC900", "#EEC900"), lty = c(3,1)), cond = list(STI_rel = 1))
-
+  
 dev.off()
 
 ###########################
