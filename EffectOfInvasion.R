@@ -48,19 +48,54 @@ countsFIN$Species <- gsub("Polygonia c-album", "Nymphalis c-album", countsFIN$Sp
 countsFIN$Species <- gsub("Cyaniris semiargus", "Polyommatus semiargus", countsFIN$Species)
 countsFIN$Species <- gsub("Leptidea juvernica", "Leptidea sinapis", countsFIN$Species)
 
-data2 <- countsFIN %>% group_by(Species, Year, Site) %>% summarise(Individuals = max(Individuals)) %>% left_join(sites_FIN)
+countsFIN <- countsFIN %>% 
+  group_by(Site, Species, Year) %>% 
+  summarise(Individuals = max(Individuals)) %>% 
+  ungroup() %>%
+  group_by(Site) %>%
+  complete(Year, nesting(Site, Species)) %>%
+  mutate(Individuals = ifelse(is.na(Individuals), 0, Individuals)) %>% left_join(sites_FIN)
 
-data2 %>% group_by(Year) %>% 
+
+countsFIN %>% group_by(Year) %>% 
   summarise(nSites = n(), nSite_occ = length(unique(Site[Species == "Araschnia levana" & Individuals > 0]))) %>%
   mutate(prop_occ = nSite_occ / nSites) %>%  
   ggplot(aes(y = prop_occ, x = Year)) + geom_line() + geom_point() + theme(legend.position="none") + geom_smooth()
 
 
+
+library(raster)
+FIN_map <- getData(country="Finland", level = 0)
+FIN_map <- spTransform(FIN_map, CRS("+init=epsg:3035"))
+
+r <- raster(ext = extent(FIN_map), resolution = 5000)
+
+FIN_map_res <- rasterize(FIN_map, r)
+plot(FIN_map_res)
+
+inv.Year <- data2 %>% group_by(Site) %>% summarise(inv.year = min(Year[Species == "Araschnia levana"]), 
+                                                   X= first(X), Y = first(Y)) %>%
+  with(as.data.frame(.))
+
+inv.cells <- cbind(extract(FIN_map_res, inv.Year[,3:4], cellnumbers = T), inv.Year)[,c(1,4)] %>%
+  group_by(cells) %>% summarise_all(first) %>% with(as.data.frame(.))
+inv.cells <- rbind(inv.cells,
+                   cbind.data.frame(cells = 1:ncell(FIN_map_res), inv.year = NA) %>% filter(!cells %in% inv.cells[,1]))
+
+FIN_map_res.inv <- setValues(FIN_map_res, inv.cells %>% arrange(cells) %>% with(as.vector(.$inv.year)))
+FIN_map_res.inv <- aggregate(FIN_map_res.inv, 10, min)
+
+
+FIN_map_res.sites <- aggregate(FIN_map_res, 10, mean)
+FIN_map_res.sites[extract(FIN_map_res.sites, inv.Year[,3:4], cellnumbers = T)[,1]] <- 2
+library(rasterVis)
+levelplot(FIN_map_res.sites, margin = F) + levelplot(FIN_map_res.inv, margin = F)
+
+
+
 # load phylogenetic data
 taxa <- unique(data2$Species)
 resolved_names <- tnrs_match_names(na.omit(taxa))
-
-tree <- get_tree_ids("ott596629")
 
 inspect(resolved_names, taxon_name = "aporia crataegi")
 resolved_names <- update(resolved_names, taxon_name = "aporia crataegi",
@@ -92,18 +127,40 @@ firstup <- function(x) {
 my_tree$tip.label <- firstup(my_tree$tip.label)
 my_tree$node.label <- "NULL"
 
+save(my_tree, file =  "../Butterflies_tree.RData")
+
 ##### compute effect of A. levena invasion for all species #####
+
+dat.temp <- data2 %>% group_by(Site) %>% summarise(inv.year = min(Year[Species == "Araschnia levana"]), 
+                                                   year.before = length(unique(Year[Year < inv.year])),
+                                                   year.after = length(unique(Year[Year > inv.year]))) %>% 
+  mutate(inv.year = ifelse(inv.year == Inf, NA, inv.year)) %>% filter(year.before > 2, year.after > 2) %>%
+  left_join(data2) %>% mutate(BeforeAfter = as.factor(ifelse(Year <= inv.year, "Before", "After")))
+
+
+dat.temp2 <- dat.temp %>% filter(Site == 56, Species == "Aglais urticae") %>% 
+  mutate(growthRate = log(Individuals+1) - log(lag(Individuals)+1))
+
+
+mGR <- lm(growthRate ~ BeforeAfter, 
+          data = dat.temp2)
+plot(growthRate ~ BeforeAfter, data = dat.temp2)
+
+mAb <- glm(Individuals ~ BeforeAfter, family = "poisson", 
+           data = dat.temp2)
+plot(Individuals ~ BeforeAfter, data = dat.temp2)
+
 
 res <- c()
 res$trends <- c()
 res$abundance <- c()
 
-for(i in unique(data2$Species)[!unique(data2$Species)%in% "Araschnia levana"]){
+for(i in unique(data2$Species)[!unique(data2$Species) %in% "Araschnia levana"]){
   print(i)
   
   dat.temp <- data2 %>% filter(Species == i) %>% ungroup()
   
-  data2_invMap <- data2  %>% group_by(Site) %>% filter(Species == "Araschnia levana") %>% 
+  data2_invMap <- data2 %>% group_by(Site) %>% filter(Species == "Araschnia levana") %>% 
     select(-1) %>% summarise(inv.Year = min(Year)) %>%
     right_join(dat.temp, by = c("Site")) %>% filter(Species == i) %>%
     mutate(Invasion = ifelse(Year > inv.Year, "Yes", "No"),
@@ -147,7 +204,7 @@ for(i in unique(data2$Species)[!unique(data2$Species)%in% "Araschnia levana"]){
 
 ## plot results
 filter_threshold <- 0
-  
+
 
 bind_rows(Abundance = res$abundance %>% arrange(estimate), 
           "Long-term trend" = res$trends %>% arrange(estimate), .id = c("Type")) %>% 
@@ -192,7 +249,7 @@ foreach(j = 1:2, .combine = rbind) %:% foreach(i = 1:10, .combine = rbind) %do% 
 
 par(mfrow=c(2,2))
 m.ab.lmPoly.final <- lm(estimate ~ poly(func_dist_to_inv, 3) ,
-                            weight = nData^2, data = res$abundance %>% filter(nData > filter_threshold, !is.na(STI)))
+                        weight = nData^2, data = res$abundance %>% filter(nData > filter_threshold, !is.na(STI)))
 visreg(m.ab.lmPoly.final, scale = "response", ylim = c(-3, 3.5), rug = F, 
        ylab = expression(paste("Effect of ", italic("Araschnia levana"))),
        xlab = expression(paste("Ecological distance to ", italic("Araschnia levana"))),
@@ -201,7 +258,7 @@ points(estimate ~ func_dist_to_inv, data = res$abundance %>% filter(nData > filt
 mtext(adj = 0, paste("Polyn. LM: F = ", round(summary(m.ab.lmPoly.final)$fstatistic[1], 2), "; P = ", round(anova(m.ab.lmPoly.final)[1,5], 2), "; R2 = ", round(summary(m.ab.lmPoly.final)$adj.r.squared, 2)), cex = .6)
 
 m.trends.lmPoly.final <- lm(estimate ~ poly(func_dist_to_inv, 10) ,
-                     weight = nData^2, data = res$trends %>% filter(nData > filter_threshold, !is.na(STI)))
+                            weight = nData^2, data = res$trends %>% filter(nData > filter_threshold, !is.na(STI)))
 visreg(m.trends.lmPoly.final, scale = "response", ylim = c(-.5, 2), rug = F, 
        ylab = expression(paste("Effect of ", italic("Araschnia levana"))),
        xlab = expression(paste("Ecological distance to ", italic("Araschnia levana"))),
@@ -210,7 +267,7 @@ points(estimate ~ func_dist_to_inv, data = res$trends %>% filter(nData > filter_
 mtext(adj = 0, paste("Polyn. LM: F = ", round(summary(m.trends.lmPoly.final)$fstatistic[1], 2), "; P = ", round(anova(m.trends.lmPoly.final)[1,5], 2), "; R2 = ", round(summary(m.trends.lmPoly.final)$adj.r.squared, 2)), cex = .6)
 
 m.ab.gam <- gam(estimate ~ s(func_dist_to_inv) ,
-                        weight = nData^2, data = res$abundance %>% filter(nData > filter_threshold, !is.na(STI)))
+                weight = nData^2, data = res$abundance %>% filter(nData > filter_threshold, !is.na(STI)))
 visreg(m.ab.gam, scale = "response", ylim = c(-3, 3.5), rug = F, 
        ylab = expression(paste("Effect of ", italic("Araschnia levana"))),
        xlab = expression(paste("Ecological distance to ", italic("Araschnia levana"))))
@@ -218,9 +275,149 @@ points(estimate ~ func_dist_to_inv, data = res$abundance %>% filter(nData > filt
 mtext(adj = 0, paste("GAM: F = ", round(summary(m.ab.gam)$s.table[1,3], 2), "; P = ", round(summary(m.ab.gam)$s.table[1,4], 2), "; R2 = ", round(summary(m.ab.gam)$r.sq, 2)), cex = .6)
 
 m.trends.gam <- gam(estimate ~ s(func_dist_to_inv) ,
-                            weight = nData^2, data = res$trends %>% filter(nData > filter_threshold, !is.na(STI)))
+                    weight = nData^2, data = res$trends %>% filter(nData > filter_threshold, !is.na(STI)))
 visreg(m.trends.gam, scale = "response", ylim = c(-.5, 2), rug = F, 
        ylab = expression(paste("Effect of ", italic("Araschnia levana"))),
        xlab = expression(paste("Ecological distance to ", italic("Araschnia levana"))))
 points(estimate ~ func_dist_to_inv, data = res$trends %>% filter(nData > filter_threshold, !is.na(STI)))
 mtext(adj = 0, paste("GAM: F = ", round(summary(m.trends.gam)$s.table[1,3], 2), "; P = ", round(summary(m.trends.gam)$s.table[1,4], 2), "; R2 = ", round(summary(m.trends.gam)$r.sq, 2)), cex = .6)
+
+
+
+####################
+
+dat.temp <- countsFIN  %>% filter(Species == "Araschnia levana", Individuals > 0) %>% 
+  group_by(Site)%>% summarise(inv.year = min(Year),inv.severity = sum(Individuals)) %>% 
+  mutate(inv.year = ifelse(inv.year == Inf, NA, inv.year)) %>% 
+  right_join(countsFIN) %>% mutate(BeforeAfter = as.factor(ifelse(Year < inv.year, "Before", "After")))
+
+for(i in unique(dat.temp$Species[!unique(dat.temp$Species) %in% "Araschnia levana"])){
+  
+  dat.temp2 <- dat.temp %>% filter(Species == i) %>% ungroup()
+  
+  dat.temp2 <- dat.temp2 %>% filter(BeforeAfter == "Before") %>% group_by(Site) %>% summarise(Before = n()) %>% 
+    left_join(dat.temp2 %>% filter(BeforeAfter == "After") %>% group_by(Site) %>% summarise(After = n())) %>%
+    filter(Before > 1, After > 1) %>% left_join(dat.temp2)
+  
+  dat.temp4 <- c()
+  for(j in unique(dat.temp2$Site)){
+    
+    impact.site <- dat.temp2 %>% filter(Site == j)
+    
+    dists <- spDistsN1(dat.temp %>% filter(is.na(inv.year), Species == i) %>% 
+                         group_by(Site) %>% summarise(X = unique(X), Y = unique(Y),
+                                                      min.year = min(Year), max.year = max(Year)) %>% 
+                         filter(min.year < unique(impact.site$inv.year), 
+                                max.year > unique(impact.site$inv.year))
+                       %>% dplyr::select(X,Y) %>% with(as.matrix(.)),
+                       impact.site %>% group_by(Site) %>% 
+                         summarise_all(first) %>% dplyr::select(X,Y) %>% with(as.matrix(.)))
+    
+    control.site <- dat.temp %>% filter(is.na(inv.year), Species == i) %>% 
+      group_by(Site) %>% summarise_all(first) %>% slice(which.min(dists)) %>% dplyr::select(Site) %>% 
+      left_join(dat.temp  %>% filter(Species == i), by = "Site") %>% 
+      mutate(BeforeAfter = ifelse(Year < unique(impact.site$inv.year), "Before", "After"))
+    
+    
+    dat.temp3 <- cbind.data.frame(bind_rows(Impact = impact.site, Control = control.site, .id = "ControlImpact"), 
+                                  Pair = paste0(j ,"_", unique(control.site$Site)), Distance = min(dists))
+    dat.temp4 <- rbind(dat.temp4, dat.temp3)
+  }
+  
+  dat.temp4 <- dat.temp4 %>% mutate(Year = Year - min(Year))
+  
+  m <- glmer(Individuals ~ BeforeAfter*ControlImpact + (1|Pair/Site) + (1|Site:Year), 
+             weights = 1/(scale(Distance,center = F)),
+             family = "poisson", data = dat.temp4,
+             nAGQ=0,control = glmerControl(optimizer = "nloptwrap", 
+                                           optCtrl=list(maxfun=1e10),
+                                           calc.derivs = FALSE), verbose = F)
+}
+
+m1 <- glmer(Individuals ~ BeforeAfter*ControlImpact + (1|Pair/Site) + (1|Year), 
+            weights = 1/(scale(Distance,center = F)),
+            family = "poisson", data = dat.temp4,
+            nAGQ=0,control = glmerControl(optimizer = "nloptwrap", 
+                                          optCtrl=list(maxfun=1e10),
+                                          calc.derivs = FALSE), verbose = F)
+
+m2 <- glmer(Individuals ~ BeforeAfter*ControlImpact + (1|Pair/Site) + (1|Site:Year), 
+            weights = 1/(scale(Distance,center = F)),
+            family = "poisson", data = dat.temp4,
+            nAGQ=0,control = glmerControl(optimizer = "nloptwrap", 
+                                          optCtrl=list(maxfun=1e10),
+                                          calc.derivs = FALSE), verbose = F)
+
+m3 <- glmer(Individuals ~ BeforeAfter*ControlImpact + (Year|Pair/Site) + (1|Site:Year), 
+            weights = 1/(scale(Distance,center = F)),
+            family = "poisson", data = dat.temp4,
+            nAGQ=0,control = glmerControl(optimizer = "nloptwrap", 
+                                          optCtrl=list(maxfun=1e10),
+                                          calc.derivs = FALSE), verbose = F)
+
+m4 <- glmer(Individuals ~ BeforeAfter*ControlImpact + (Year|Pair/Site) + (1|Year), 
+            weights = 1/(scale(Distance,center = F)),
+            family = "poisson", data = dat.temp4,
+            nAGQ=0,control = glmerControl(optimizer = "nloptwrap", 
+                                          optCtrl=list(maxfun=1e10),
+                                          calc.derivs = FALSE), verbose = F)
+
+m5 <- glmer(Individuals ~ BeforeAfter*ControlImpact + (1|Pair/Site), 
+            weights = 1/(scale(Distance,center = F)),
+            family = "poisson", data = dat.temp4,
+            nAGQ=0,control = glmerControl(optimizer = "nloptwrap", 
+                                          optCtrl=list(maxfun=1e10),
+                                          calc.derivs = FALSE), verbose = F)
+
+m6 <- glmer(Individuals ~ BeforeAfter*ControlImpact + (Year|Pair/Site), 
+            weights = 1/(scale(Distance,center = F)),
+            family = "poisson", data = dat.temp4,
+            nAGQ=0,control = glmerControl(optimizer = "nloptwrap", 
+                                          optCtrl=list(maxfun=1e10),
+                                          calc.derivs = FALSE), verbose = F)
+
+m7 <- glm(Individuals ~ BeforeAfter*ControlImpact, 
+          weights = 1/(scale(Distance,center = F)),
+          family = "poisson", data = dat.temp4)
+
+m8 <- glmer(Individuals ~ BeforeAfter*ControlImpact + (1|Pair) + (1|Year), 
+            weights = 1/(scale(Distance,center = F)),
+            family = "poisson", data = dat.temp4,
+            nAGQ=0,control = glmerControl(optimizer = "nloptwrap", 
+                                          optCtrl=list(maxfun=1e10),
+                                          calc.derivs = FALSE), verbose = F)
+
+m9 <- glmer(Individuals ~ BeforeAfter*ControlImpact + (Year|Pair) + (1|Year), 
+            weights = 1/(scale(Distance,center = F)),
+            family = "poisson", data = dat.temp4,
+            nAGQ=0,control = glmerControl(optimizer = "nloptwrap", 
+                                          optCtrl=list(maxfun=1e10),
+                                          calc.derivs = FALSE), verbose = F)
+
+m10 <- glmer(Individuals ~ BeforeAfter*ControlImpact + (Year|Pair) + (1|Pair:Year), 
+             weights = 1/(scale(Distance,center = F)),
+             family = "poisson", data = dat.temp4,
+             nAGQ=0,control = glmerControl(optimizer = "nloptwrap", 
+                                           optCtrl=list(maxfun=1e10),
+                                           calc.derivs = FALSE), verbose = F)
+
+m11 <- glmer(Individuals ~ BeforeAfter*ControlImpact + (1|Pair) + (1|Pair:Year), 
+             weights = 1/(scale(Distance,center = F)),
+             family = "poisson", data = dat.temp4,
+             nAGQ=0,control = glmerControl(optimizer = "nloptwrap", 
+                                           optCtrl=list(maxfun=1e10),
+                                           calc.derivs = FALSE), verbose = F)
+
+
+
+
+MuMIn::model.sel(m1,m2,m3,m4,m5,m6,m7,m8,m9,m10,m11)
+emmeans(m2, ~BeforeAfter*ControlImpact, transform = "response") %>% with(as.data.frame(.)) %>% 
+  mutate(BeforeAfter = factor(BeforeAfter, levels = c("Before", "After"))) %>%
+  ggplot(aes(x = BeforeAfter, color = ControlImpact, y = rate)) + geom_point(position = position_dodge(width = .3)) + 
+  geom_errorbar(aes(ymin = asymp.LCL, ymax = asymp.UCL), width = 0, position = position_dodge(width = .3)) + 
+  ggtitle(expression(paste("Effect of ", italic("Araschnia levana"), " invasion on", italic(" Aglais urticae")))) + 
+  scale_y_continuous("Average abundance") + 
+  scale_color_discrete(name = "", labels = c("Control site", "Invaded site")) + 
+  scale_x_discrete("") + 
+  theme_classic()
