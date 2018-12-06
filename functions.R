@@ -276,8 +276,7 @@ predict_raster <- function(model, scaleList, n = 100){
   
   pred <- predict(model, newdata, re.form = NA)
   pred <- cbind.data.frame(newdata, pred = pred) %>% dplyr::filter(Habitat == "Open")
-  pred <- pred %>% group_by(PLAND, CLUMPY) %>% 
-    mutate(Year = Year * scaleList$scale["Year"] + scaleList$center["Year"]) %>%
+  pred <- pred %>% group_by(PLAND, CLUMPY) %>%
     do(trend = lm(pred ~ Year, data = .)) %>% tidy(trend) %>% dplyr::filter(term == "Year")
   pred <- rasterFromXYZ(pred[,c("PLAND", "CLUMPY", "estimate")])
   
@@ -325,11 +324,57 @@ predict_raster2 <- function(model, xvar, yvar, cond = NULL, n = 100){
   pred <- predict(model, newdata, re.form = NA, type = "response")
   pred <- cbind.data.frame(newdata, pred = pred)
   # pred <- subset(pred, PC1 == median(model@frame$STI_rel))
-  
-  ah <- ahull(alpha = 2.5, x = unique(model@frame[,c(xvar, yvar)]))
+
+  ah <- ahull(alpha = 4, x = unique(model@frame[,c(xvar, yvar)]))
   ah <- a2shp(ah)
   
   pred <- rasterFromXYZ(pred[,c(xvar, yvar, "pred")])
+  # pred <- mask(pred, ah)
+  pred <- as.data.frame(rasterToPoints(pred))
+  
+  pred$x <- pred$x * scaleList$scale[xvar] + scaleList$center[xvar]
+  pred$y <- pred$y * scaleList$scale[yvar] + scaleList$center[yvar]
+  
+  names(pred)[1:2] <- c(xvar, yvar)
+  
+  return(pred)
+}
+
+predict_raster3 <- function(model, xvar, yvar, zvar, n = 100){
+  require(alphahull)
+  require(raster)
+  require(broom)
+  
+  newdata <- data.frame(X = median(model@frame$X), Y = median(model@frame$Y),
+                        STI_rel = median(model@frame$STI_rel), 
+                        PC1 = rep(c(-1,median(model@frame$PC1),1), each = n^3),
+                        PC3 = median(model@frame$PC3),
+                        PC4 = median(model@frame$PC4),
+                        Habitat = "Open", country = "NL", 
+                        PLAND = median(model@frame$PLAND),
+                        CLUMPY = median(model@frame$CLUMPY))
+  
+  newdata <- cbind(newdata[,!names(newdata) %in% c(xvar, yvar, zvar)],
+                   expand.grid(seq(min(model@frame[,xvar]), max(model@frame[,xvar]), 
+                                   length.out = n), 
+                               seq(min(model@frame[,yvar]), max(model@frame[,yvar]), 
+                                                        length.out = n), 
+                               seq(min(model@frame[,zvar]), max(model@frame[,zvar]), 
+                                   length.out = n)))
+  names(newdata)[c((length(names(newdata))-2),(length(names(newdata))-1), length(names(newdata)))] <- c(xvar, yvar, zvar)
+  
+
+  pred <- predict(model, newdata, re.form = NA, type = "response")
+  pred <- cbind.data.frame(newdata, pred = pred)
+  
+  pred <- pred %>% group_by(.dots= c(xvar, yvar)) %>%
+    do(effect = lm(formula = paste("pred ~ ", zvar), data = .)) %>% tidy(effect) %>% dplyr::filter(term == zvar)
+
+  ah <- ahull(alpha = 5, x = (unique(model@frame[,c(xvar, yvar)]) %>% 
+                                mutate(xvar = jitter(.[,xvar]), yvar = jitter(.[,yvar])))[,3:4])
+  ah <- a2shp(ah)
+  
+  pred <- rasterFromXYZ(pred[,c(xvar, yvar, "estimate")])
   pred <- mask(pred, ah)
   pred <- as.data.frame(rasterToPoints(pred))
   
@@ -347,7 +392,7 @@ label_wrap <- function(x) {
 }  
 
 
-a2shp <- function(x, increment=360, rnd=10, proj4string=CRS(as.character(NA))){
+a2shp <- function(x, increment=360, rnd=5, proj4string=CRS(as.character(NA))){
   require(alphahull)
   require(maptools)
   if (class(x) != "ahull"){

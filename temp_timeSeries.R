@@ -1,7 +1,5 @@
-library(raster)
 library(rts)
 library(stringr)
-library(ggplot2)
 library(data.table)
 
 
@@ -27,35 +25,92 @@ r2 <- ReadGrib("C:/Local Folder (c)/monthly_19610101T000000_19900101T000000_2016
 
 
 ##### European scale #####
-r <- brick("//storage.slu.se/Home$/yofo0001/Desktop/tg_0.25deg_reg_v15.0.nc")
-r <- subset(r, names(r)[grep(c("\\.03\\.|\\.04\\.|\\.05\\.|\\.06\\.|\\.07\\.|\\.08\\."), names(r))])
+r <- brick("C:/Local folder (c)/tg_0.25deg_reg_v17.0.nc")
+# r <- subset(r, names(r)[grep(c("\\.03\\.|\\.04\\.|\\.05\\.|\\.06\\.|\\.07\\.|\\.08\\."), names(r))])
 r <- subset(r, names(r)[as.numeric(str_sub(names(r), 2,5)) > 1988])
 
 rasterTS <- rts(r, as.Date(gsub("X", "", names(r)), format = "%Y.%m.%d"))
-rasterTSMonth <- apply.yearly(rasterTS, mean)
+
+rasterTSMonth <- apply.monthly(rasterTS, mean)
 write.rts(rasterTSMonth, "../Temperature/rasterTSMonth", overwrite = T)
 
+# read monthly rasterTS
+rasterTSMonth <- read.rts("../Temperature/rasterTSMonth")
+# read sites
+butterflies.data.presence <- subset(fread("../Data/cti_butterflies_data.csv"), Scale ==50000 & type == "Presence")
+coords <- SpatialPoints(unique(butterflies.data.presence[,c("X", "Y")]), proj4string = CRS("+init=epsg:3035"))
+coords_WGS84 <- spTransform(coords, CRS("+init=epsg:4326"))
+
+# set days
+seq_days_summer <- as.Date(index(rasterTSMonth@time)[grep(c("-04-|-05-|-06-|-07-|-08-|-09-"), index(rasterTSMonth@time))])+1
+seq_days_winter <- as.Date(index(rasterTSMonth@time)[grep(c("-10-|-11-|-12-|-01-|-02-|-03-"), index(rasterTSMonth@time))])+1
+
+#extract
+ext_temp_summer <- raster::extract(rasterTSMonth, coords_WGS84, seq_days_summer)
+ext_temp_winter <- raster::extract(rasterTSMonth, coords_WGS84, seq_days_winter)
+
+library(tidyverse) 
+
+# temp_summer <- c()
+# for(i in 1:dim(ext_temp_summer)[2]){
+#   temp_summer <- rbind.data.frame(temp_summer, as.data.frame(ext_temp_summer[,i]) %>% 
+#                                     rownames_to_column("Date") %>% group_by(Year = substr(Date,1,4)))
+#   
+# }
+# 
+
+temp_summer <- c()
+for(i in 1:dim(ext_temp_summer)[2]){
+  if(!any(is.na(ext_temp_summer[,i]))){
+    site_dat_temp <- as.data.frame(ext_temp_summer[,i]) %>% rownames_to_column("Date") %>% group_by(Year = substr(Date,1,4)) %>%
+      summarise(temp = mean(V1)) %>% mutate(Year = as.numeric(Year))
+    period <- butterflies.data.presence %>% filter(X == coords[i]@coords[1], Y == coords[i]@coords[2]) %>%
+      summarise(Site = first(Site), country = unique(country), first = min(Year), last = max(Year), X = unique(X), Y = unique(Y))
+    site_dat_temp <- site_dat_temp %>% filter(Year >= period$first, Year <= period$last)
+    m <- lm(temp ~ Year, data = site_dat_temp)
+    temp_summer <- rbind.data.frame(temp_summer, 
+                                    cbind.data.frame(period, mean.temp = mean(site_dat_temp$temp), trend.temp = coef(m)[2]))
+  }
+}
+rownames(temp_summer) <- NULL
+
+temp_summer %>% group_by(country) %>% summarise(mean.trend = mean(trend.temp, na.rm = T), 
+                                                se.trend = plotrix::std.error(trend.temp, na.rm = T))
+
+
+temp_summer_2 <- c()
+for(i in 1:dim(ext_temp_summer)[2]){
+  if(!any(is.na(ext_temp_summer[,i]))){
+    site_dat_temp <- as.data.frame(ext_temp_summer[,i]) %>% rownames_to_column("Date") %>% group_by(Year = substr(Date,1,4)) %>%
+      summarise(temp = mean(V1)) %>% mutate(Year = as.numeric(Year))
+    period <- butterflies.data.presence %>% filter(X == coords[i]@coords[1], Y == coords[i]@coords[2]) %>%
+      summarise(Site = first(Site), country = unique(country), first = min(Year), last = max(Year), X = unique(X), Y = unique(Y))
+    temp_summer_2 <- rbind.data.frame(temp_summer_2, cbind.data.frame(period, site_dat_temp))
+  }
+}
+rownames(temp_summer_2) <- NULL
+
+library(lmerTest)
+m.NL <- lmer(temp ~ Year + X*Y + (1|Site), data = temp_summer_2 %>% filter(country == "NL"))
+summary(m.NL)$coefficients[2,1:2]
+
+m.FIN <- lmer(temp ~ Year + X*Y + (1|Site), data = temp_summer_2 %>% filter(country == "FIN"))
+summary(m.FIN)
+summary(m.FIN)$coefficients[2,1:2]
+
+m <- lmer(temp ~ Year + X*Y + (1|Site), data = temp_summer_2)
+summary(m)$coefficients[2,1:2]
 
 ####
 
-rasterTSMonth <- read.rts("../Temperature/rasterTSMonth")
 
 birds.data <- as.tbl(fread("../Data/cti_birds_data.csv")) %>% dplyr:::filter(type == "Presence", Scale == 3000)
 
-butterflies.data <- as.tbl(fread("../Data/cti_butterflies_data.csv"))
-butterflies.data <- butterflies.data %>% dplyr:::filter(type == "Presence", Scale == 3000)
-butterflies.data <- 
-  left_join(
-    butterflies.data %>%
-      group_by(coords = paste(X,Y)) %>% summarise(Site = first(Site)) %>%
-      ungroup(),
-    butterflies.data %>% mutate(coords = paste(X,Y)) %>% dplyr:::select(-2),
-    by = c("coords" = "coords")
-  ) %>% dplyr:::select(-1) %>%
-  group_by(Site, Year) %>% summarise_all(function(x){ifelse(is.numeric(x),mean(x, na.rm = TRUE), x)})
+
+m_trend_NL <- lmer()
 
 
-cti.data <- butterflies.data
+cti.data <- butterflies.data.presence
 trend <- c()
 n = 0
 for(i in 1:length(unique(cti.data$Site))){

@@ -405,3 +405,21 @@ pres_abs.data <- pres_abs.data %>% mutate(n = occ_mean) %>%
   dplyr:::select(-occ_mean, -occ_se, -SpCode, -Scientific_name, -X_km, -Y_km)
 
 write_csv(pres_abs.data, "../Data/pres_abs_NL_data.csv")
+
+
+
+#### add relative STI
+
+butterflies.cti.presence <- as.tbl(fread("../Data/cti_butterflies_data.csv")) %>% dplyr::filter(type == "Presence")
+butterflies <- bind_rows(read_csv("../Data/pres_abs_FIN_data.csv"), read_csv("../Data/pres_abs_NL_data.csv"))
+
+butterflies <- left_join(butterflies %>% group_by(coords = paste(X,Y)),
+                         butterflies.cti.presence %>% group_by(coords = paste(X,Y)) %>% summarise(cti = mean(cti)),
+                         by = "coords")
+
+butterflies <- butterflies %>% mutate(STI_rel = cti - STI) %>%
+  dplyr::filter(!is.na(STI)) %>%
+  mutate(gridCell50 = ifelse(country == "NL", paste0(gridCell50, "_NL"), paste0(gridCell50, "_FIN")))
+butterflies <- butterflies %>% as.data.frame %>% polypoly::poly_add_columns(.col = PC1, degree = 2) %>% as.tbl
+
+write_csv(butterflies, "C:/Local Folder (c)/butterflies_occ.csv")

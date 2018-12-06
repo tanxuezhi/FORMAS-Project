@@ -2,11 +2,12 @@ library(tidyverse)
 library(raster)
 library(data.table)
 library(rgeos)
+library(emmeans)
+source("functions.R")
 
 #####################
 ### Illustrations ###
 #####################
-source("functions.R")
 
 ##############
 ## data set ##
@@ -39,6 +40,13 @@ ggplot(data, aes(x = X, y = Y, color = nYear)) + geom_point(alpha = .5) +
 ###############
 ## landscape ##
 ###############
+
+butterflies.data.presence %>% dplyr::filter(Scale == 50000) %>% group_by(country, Year) %>% Hmisc::describe()
+  
+  summarise(minCLUMPY = min(CLUMPY)) %>%
+  group_by(country) %>%
+  summarise(mean.noSite = mean(n), sd.noSite = sd(n))
+
 ggplot(butterflies.data.presence %>% dplyr:::filter(PLAND < .95 & PLAND > .05) %>% group_by(country, Scale, Habitat) %>%
          distinct(), aes(y = CLUMPY, x = PLAND, color =country)) + 
   geom_point(alpha = .3) + facet_wrap( ~ Scale, labeller = label_wrap) + 
@@ -71,11 +79,11 @@ buf4 <- gBuffer(spgeom = SpatialPoints(pt4), width = 20000)
 land4 <- raster::mask(crop(SNH_open, buf4), buf4)
 
 # plot
-par(mfrow=c(2,2), mar = c(1,1,1,1))
-plot(land2, legend = F, axes = F, box = F)
-plot(land1, legend = F, axes = F, box = F)
-plot(land4, legend = F, axes = F, box = F)
-plot(land3, legend = F, axes = F, box = F)
+par(mfrow=c(2,2), mar = c(0.1,0.1,0.1,0.1))
+plot(land3, legend = F, axes = F, box = F, col = c("#FFD700", "#548B54"))
+plot(land1, legend = F, axes = F, box = F, col = c("#FFD700", "#548B54"))
+plot(land4, legend = F, axes = F, box = F, col = c("#FFD700", "#548B54"))
+plot(land2, legend = F, axes = F, box = F, col = c("#FFD700", "#548B54"))
 
 
 ######################
@@ -107,6 +115,8 @@ dev.off()
 ###########################
 ### show classification ###
 ###########################
+butterflies <- as.tbl(fread("../Data/butterflies_occ.csv"))
+
 par(mfrow=c(2,2))
 
 dat.temp <- butterflies %>% dplyr::filter(Scale == 50000, Site == "1008_NL", Year > 1991)
