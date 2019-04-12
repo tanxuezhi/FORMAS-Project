@@ -276,7 +276,17 @@ table((countsFIN %>%
 
 
 #butterflies - netherlands
-occupancy_NL <- read_csv2("../Data/Butterflies - Netherlands/Occupancy_km_Spec_Yr.csv")
+# occupancy_NL <- read_csv2("../Data/Butterflies - Netherlands/Occupancy_km_Spec_Yr.csv")
+
+countsNL <- readRDS("../Data/Butterflies - Netherlands/AllSpecies_reg_gam_ind_20171206_algroutes.rds") %>% as.tbl
+countsNL <- countsNL %>% 
+  group_by(SITE) %>%
+  complete(YEAR, nesting(SITE, SPECIES)) %>%
+  mutate(n = ifelse(is.na(regional_gam) | regional_gam == 0, 0, 1)) %>%
+  rename(Year = YEAR, Site = SITE, Species = SPECIES) %>% dplyr::select(Year,Site,Species,n)
+
+table((countsNL %>% 
+         group_by(Site, Species) %>% summarise(n = length(unique(Year))))$n)
 
 #################################
 #### merge and write on disc ####
@@ -297,9 +307,9 @@ occupancy_NL <- read_csv2("../Data/Butterflies - Netherlands/Occupancy_km_Spec_Y
 # 
 # write_csv(pres_abs.data, "../Data/pres_abs_birds_data.csv")
 
-frag_data <- read_csv("../Connectivity/Fragmentation/Frag_indices_Allhab.csv")
+frag_data <- read_csv("../Connectivity - Fragmentation/Fragmentation/Frag_indices_Allhab.csv")
 
-traits.butterflies <- as.tbl(read_csv("../Data/Butterflies - Netherlands/SpeciesTraits_WDV2014.csv"))
+traits.butterflies <- as.tbl(read_csv("../Data/Traits/SpeciesTraits_WDV2014.csv"))
 traits.butterflies[grep("Colias croceus", traits.butterflies$Scientific_name), "Scientific_name"] <- "Colias crocea"
 traits.butterflies[grep("walbum", traits.butterflies$Scientific_name), "Scientific_name"] <- "Satyrium w-album"
 traits.butterflies[grep("Neozephyrus quercus", traits.butterflies$Scientific_name), "Scientific_name"] <- "Favonius quercus"
@@ -320,7 +330,7 @@ sites_FIN <- read_csv(file = "../Data/Butterflies - Finland/Sites_FIN_ETRS89_lan
 but.pts <- SpatialPoints(sites_FIN[,c("X", "Y")])
 but.r <- raster(ext = extent(but.pts)*1.1, resolution = 50000)
 values(but.r) <- c(1:ncell(but.r))
-gridCell50 <- extract(but.r, but.pts)
+gridCell50 <- raster::extract(but.r, but.pts)
 sites_FIN <- bind_cols(sites_FIN, gridCell50 = gridCell50)
 
 countsFIN <- left_join(countsFIN, sites_FIN, by = c("Site")) %>% ungroup() %>%
@@ -365,21 +375,16 @@ sites_NL <- as.tbl(left_join(rio:::import(file = "../Data/Butterflies - Netherla
 but.pts <- SpatialPoints(sites_NL[,c("X", "Y")])
 but.r <- raster(ext = extent(but.pts)*1.1, resolution = 50000)
 values(but.r) <- c(1:ncell(but.r))
-gridCell50 <- extract(but.r, but.pts)
+gridCell50 <- raster::extract(but.r, but.pts)
 
 sites_NL <- bind_cols(sites_NL, gridCell50 = gridCell50)
 
-occupancy_NL <- left_join(occupancy_NL %>% dplyr::select(-X_km, -Y_km), 
-                          sites_NL %>% mutate(XY_km = as.integer(paste0(X_km, Y_km))) %>% dplyr::select(-X_km, -Y_km),
-                          by = c("XY_km")) %>% dplyr::select(-XY_km)
+countsNL <- left_join(countsNL, sites_NL %>% dplyr::select(-X_km, -Y_km)) %>% ungroup() %>%
+  mutate(Site = paste0(Site, "_NL")) %>% filter(!is.na(X))
 
-occupancy_NL <- left_join(occupancy_NL, sites_NL %>% dplyr::select(1,2,3), by = c("Site")) %>% ungroup() %>%
-  mutate(Site = paste0(Site, "_NL"))
-
-pres_abs.data <- left_join(occupancy_NL,
-                           traits.butterflies %>% dplyr:::select(-Species),
-                           by = c("SpCode" = "FF_code")) %>%
-  dplyr::mutate(Species = Scientific_name)
+pres_abs.data <- left_join(countsNL,
+                           traits.butterflies %>% mutate(Species = casefold(Species))) %>%
+  dplyr::mutate(Species = Scientific_name) %>% dplyr::select(-Scientific_name) %>% filter(!is.na(Species))
 
 pres_abs.data <- left_join(pres_abs.data, butterfly_habitat, by = "Species")
 
@@ -401,9 +406,6 @@ pres_abs.data <- bind_rows(
     frag_data,
     by = c("Site" = "Site", "Habitat" = "Habitat")))
 
-pres_abs.data <- pres_abs.data %>% mutate(n = occ_mean) %>% 
-  dplyr:::select(-occ_mean, -occ_se, -SpCode, -Scientific_name, -X_km, -Y_km)
-
 write_csv(pres_abs.data, "../Data/pres_abs_NL_data.csv")
 
 
@@ -413,13 +415,11 @@ write_csv(pres_abs.data, "../Data/pres_abs_NL_data.csv")
 butterflies.cti.presence <- as.tbl(fread("../Data/cti_butterflies_data.csv")) %>% dplyr::filter(type == "Presence")
 butterflies <- bind_rows(read_csv("../Data/pres_abs_FIN_data.csv"), read_csv("../Data/pres_abs_NL_data.csv"))
 
-butterflies <- left_join(butterflies %>% group_by(coords = paste(X,Y)),
-                         butterflies.cti.presence %>% group_by(coords = paste(X,Y)) %>% summarise(cti = mean(cti)),
-                         by = "coords")
+butterflies <- left_join(butterflies,
+                         butterflies.cti.presence %>% group_by(Site) %>% summarise(cti = mean(cti)))
 
 butterflies <- butterflies %>% mutate(STI_rel = cti - STI) %>%
   dplyr::filter(!is.na(STI)) %>%
   mutate(gridCell50 = ifelse(country == "NL", paste0(gridCell50, "_NL"), paste0(gridCell50, "_FIN")))
-butterflies <- butterflies %>% as.data.frame %>% polypoly::poly_add_columns(.col = PC1, degree = 2) %>% as.tbl
 
 write_csv(butterflies, "C:/Local Folder (c)/butterflies_occ.csv")

@@ -100,8 +100,8 @@ mods_all <- rbind.data.frame(
                                     cbind.data.frame(Country = "Netherlands", type = "Abundance", mods_sp_abundance_NL),
                                     cbind.data.frame(Country = "All", type = "Presence", mods_sp_presence),
                                     cbind.data.frame(Country = "All", type = "Abundance", mods_sp_abundance)
-                                    )
-                   ),
+                   )
+  ),
   cbind.data.frame(Landcover_classification = "Generalist", 
                    rbind.data.frame(cbind.data.frame(Country = "Finland", type = "Presence", mods_gen_presence_FIN),
                                     cbind.data.frame(Country = "Finland", type = "Abundance", mods_gen_abundance_FIN),
@@ -169,7 +169,7 @@ mod20 <-   lmer(cti ~ CLUMPY * PLAND * Year + Habitat * Year + X*Y + (Year|gridC
 
 
 percentiles_percountry <- dat %>% dplyr:::filter(Scale == 20000) %>% group_by(Site) %>% 
-  summarize_all(first) %>% select(1,6,7,13,15,16,17) %>% 
+  summarize_all(first) %>% dplyr::select(1,6,7,13,15,16,17) %>% 
   mutate(PLAND = PLAND * scaleList$scale["PLAND"] + scaleList$center["PLAND"],
          CLUMPY = CLUMPY * scaleList$scale["CLUMPY"] + scaleList$center["CLUMPY"]) %>% 
   gather(-1,-2,-3,-4,-5, key = "Variable", value = "Value") %>% group_by(Variable, country) %>% 
@@ -177,7 +177,7 @@ percentiles_percountry <- dat %>% dplyr:::filter(Scale == 20000) %>% group_by(Si
   unnest
 
 percentiles <- dat %>% dplyr:::filter(Scale == 20000) %>% group_by(Site) %>% 
-  summarize_all(first) %>% select(1,6,7,13,15,16,17) %>% 
+  summarize_all(first) %>% dplyr::select(1,6,7,13,15,16,17) %>% 
   mutate(PLAND = PLAND * scaleList$scale["PLAND"] + scaleList$center["PLAND"],
          CLUMPY = CLUMPY * scaleList$scale["CLUMPY"] + scaleList$center["CLUMPY"]) %>% 
   gather(-1,-2,-3,-4,-5, key = "Variable", value = "Value") %>% group_by(Variable) %>% 
@@ -189,26 +189,43 @@ CLUMPY_brks <- (c(0.80,0.91) - scaleList$center["CLUMPY"])/ scaleList$scale["CLU
 PLAND_brks <- (c(0.06,0.54) - scaleList$center["PLAND"])/ scaleList$scale["PLAND"]
 
 
-emtrends(mod20, ~ CLUMPY | PLAND, var = "Year", at = list(CLUMPY = (percentiles[percentiles$Variable == "CLUMPY", "value"][[1]] -
-                                                                      scaleList$center["CLUMPY"])/ scaleList$scale["CLUMPY"],
-                                                          PLAND = (percentiles[percentiles$Variable == "PLAND", "value"][[1]] -
-                                                                     scaleList$center["PLAND"])/ scaleList$scale["PLAND"]))
+emtrends(mod20, ~ CLUMPY | PLAND, var = "Year", 
+         at = list(CLUMPY = (percentiles[percentiles$Variable == "CLUMPY", "value"][[1]] -
+                               scaleList$center["CLUMPY"])/ scaleList$scale["CLUMPY"],
+                   PLAND = (percentiles[percentiles$Variable == "PLAND", "value"][[1]] -
+                              scaleList$center["PLAND"])/ scaleList$scale["PLAND"]))
 
 emtrends(mod20, ~ CLUMPY | PLAND, var = "Year", at = list(CLUMPY = CLUMPY_brks,
                                                           PLAND = PLAND_brks))
 
-pred.test <- predict(mod20, newdata = data.frame(CLUMPY = (0.881 - scaleList$center["CLUMPY"])/scaleList$scale["CLUMPY"],
-                                                 PLAND = (0.253 - scaleList$center["PLAND"])/scaleList$scale["PLAND"],
-                                                 Year = 1995:2016,
-                                                 Habitat = "Open",
-                                                 X = median(dat$X),
-                                                 Y = median(dat$Y),
-                                                 Site = "398_NL",
-                                                 gridCell50 = "1126_NL"
-), re.form = NA)
+# pred.test <- predict(mod20, newdata = data.frame(CLUMPY = (0.881 - scaleList$center["CLUMPY"])/scaleList$scale["CLUMPY"],
+#                                                  PLAND = (0.253 - scaleList$center["PLAND"])/scaleList$scale["PLAND"],
+#                                                  Year = 1995:2016,
+#                                                  Habitat = "Open",
+#                                                  X = median(dat$X),
+#                                                  Y = median(dat$Y),
+#                                                  Site = "398_NL",
+#                                                  gridCell50 = "1126_NL"), re.form = NA)
+# 
+# lm(pred.test ~ c(1995:2016))
 
-lm(pred.test ~ c(1995:2016))
+cti_spat_trend <- lmer(cti ~ Y + (Y|Year), data = dat %>% filter(Scale == 20000))
 
+temp_temp_trend <- lmer(temp ~ Year + (1|Site), data = dat %>% filter(Scale == 20000))
+temp_spat_trend <- lmer(temp ~ Y + (1|Year), data = dat %>% filter(Scale == 20000))
+
+m <- lmer(temp ~ Year + X*Y + (1|Site), data = temp_summer_2)
+
+
+
+# median frag:
+0.001997671  / (-fixef(cti_spat_trend)[2] * 1000)
+
+# low frag:
+0.008198834 / (-fixef(cti_spat_trend)[2] * 1000)
+
+# climate across all sites 1991-2016:
+0.027318398 / (-(-2.953940e-06) * 1000)
 
 visreg(mod20, "Year", by = "PLAND", breaks = PLAND_brks, rug = F, scale = "response", overlay = T, band = F, 
        cond = list(CLUMPY = CLUMPY_brks[1]), type = "contrast",

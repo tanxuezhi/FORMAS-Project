@@ -43,10 +43,6 @@ ggplot(data, aes(x = X, y = Y, color = nYear)) + geom_point(alpha = .5) +
 
 butterflies.data.presence %>% dplyr::filter(Scale == 50000) %>% group_by(country, Year) %>% Hmisc::describe()
   
-  summarise(minCLUMPY = min(CLUMPY)) %>%
-  group_by(country) %>%
-  summarise(mean.noSite = mean(n), sd.noSite = sd(n))
-
 ggplot(butterflies.data.presence %>% dplyr:::filter(PLAND < .95 & PLAND > .05) %>% group_by(country, Scale, Habitat) %>%
          distinct(), aes(y = CLUMPY, x = PLAND, color =country)) + 
   geom_point(alpha = .3) + facet_wrap( ~ Scale, labeller = label_wrap) + 
@@ -77,6 +73,8 @@ land3 <- raster::mask(crop(SNH_forest, buf3), buf3)
 pt4 <- butterflies.data.presence %>% dplyr::filter(Site == "77_FIN") %>% dplyr::select(X, Y) %>% summarise_all(unique)
 buf4 <- gBuffer(spgeom = SpatialPoints(pt4), width = 20000)
 land4 <- raster::mask(crop(SNH_open, buf4), buf4)
+
+butterflies.data.presence %>% dplyr::filter(Site %in% c("1231_NL", "1743_NL", "72_FIN", "77_FIN"), Scale == 20000, Year == 2010)
 
 # plot
 par(mfrow=c(2,2), mar = c(0.1,0.1,0.1,0.1))
@@ -115,6 +113,8 @@ dev.off()
 ###########################
 ### show classification ###
 ###########################
+library(visreg)
+
 butterflies <- as.tbl(fread("../Data/butterflies_occ.csv"))
 
 par(mfrow=c(2,2))

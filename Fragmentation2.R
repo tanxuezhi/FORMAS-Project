@@ -1,4 +1,5 @@
 library(raster)
+library(tidyverse)
 
 ### load data
 butterflies.data <- bind_rows("FIN" = read_csv(file = "../Data/Butterflies - Finland/Sites_FIN_ETRS89_landcover.csv") %>% 

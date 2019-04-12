@@ -13,7 +13,7 @@ sites_FIN <- read_csv(file = "../Data/Butterflies - Finland/Sites_FIN_ETRS89_lan
 sites_NL <- as.tbl(left_join(rio:::import(file = "../Data/Butterflies - Netherlands/Sites_NL.xlsx"),
                              read_csv(file = "../Data/Butterflies - Netherlands/Sites_NL_ETRS89_landcover.csv")))
 
-traits.butterflies <- as.tbl(read_csv("../Data/Butterflies - Netherlands/SpeciesTraits_WDV2014.csv"))
+traits.butterflies <- as.tbl(read_csv("../Data/Traits/SpeciesTraits_WDV2014.csv"))
 traits.butterflies[grep("Colias croceus", traits.butterflies$Scientific_name), "Scientific_name"] <- "Colias crocea"
 traits.butterflies[grep("walbum", traits.butterflies$Scientific_name), "Scientific_name"] <- "Satyrium w-album"
 traits.butterflies[grep("Neozephyrus quercus", traits.butterflies$Scientific_name), "Scientific_name"] <- "Favonius quercus"
@@ -131,11 +131,12 @@ save(my_tree, file =  "../Butterflies_tree.RData")
 
 ##### compute effect of A. levena invasion for all species #####
 
-dat.temp <- data2 %>% group_by(Site) %>% summarise(inv.year = min(Year[Species == "Araschnia levana"]), 
-                                                   year.before = length(unique(Year[Year < inv.year])),
-                                                   year.after = length(unique(Year[Year > inv.year]))) %>% 
+dat.temp <- countsFIN %>% group_by(Site) %>% filter(Individuals > 0) %>% 
+  summarise(inv.year = min(Year[Species == "Araschnia levana"]), 
+            year.before = length(unique(Year[Year < inv.year])),
+            year.after = length(unique(Year[Year > inv.year]))) %>% 
   mutate(inv.year = ifelse(inv.year == Inf, NA, inv.year)) %>% filter(year.before > 2, year.after > 2) %>%
-  left_join(data2) %>% mutate(BeforeAfter = as.factor(ifelse(Year <= inv.year, "Before", "After")))
+  left_join(countsFIN) %>% mutate(BeforeAfter = as.factor(ifelse(Year <= inv.year, "Before", "After")))
 
 
 dat.temp2 <- dat.temp %>% filter(Site == 56, Species == "Aglais urticae") %>% 
@@ -151,6 +152,8 @@ mAb <- glm(Individuals ~ BeforeAfter, family = "poisson",
 plot(Individuals ~ BeforeAfter, data = dat.temp2)
 
 
+data2 <- countsFIN
+
 res <- c()
 res$trends <- c()
 res$abundance <- c()
@@ -161,7 +164,7 @@ for(i in unique(data2$Species)[!unique(data2$Species) %in% "Araschnia levana"]){
   dat.temp <- data2 %>% filter(Species == i) %>% ungroup()
   
   data2_invMap <- data2 %>% group_by(Site) %>% filter(Species == "Araschnia levana") %>% 
-    select(-1) %>% summarise(inv.Year = min(Year)) %>%
+    summarise(inv.Year = min(Year)) %>%
     right_join(dat.temp, by = c("Site")) %>% filter(Species == i) %>%
     mutate(Invasion = ifelse(Year > inv.Year, "Yes", "No"),
            Year = Year - min(Year)) %>% 
@@ -285,11 +288,14 @@ mtext(adj = 0, paste("GAM: F = ", round(summary(m.trends.gam)$s.table[1,3], 2), 
 
 
 ####################
+library(sp)
 
-dat.temp <- countsFIN  %>% filter(Species == "Araschnia levana", Individuals > 0) %>% 
+data2 <- countsFIN
+
+dat.temp <- data2 %>% filter(Species == "Araschnia levana", Individuals > 0) %>% 
   group_by(Site)%>% summarise(inv.year = min(Year),inv.severity = sum(Individuals)) %>% 
   mutate(inv.year = ifelse(inv.year == Inf, NA, inv.year)) %>% 
-  right_join(countsFIN) %>% mutate(BeforeAfter = as.factor(ifelse(Year < inv.year, "Before", "After")))
+  right_join(data2) %>% mutate(BeforeAfter = as.factor(ifelse(Year < inv.year, "Before", "After")))
 
 for(i in unique(dat.temp$Species[!unique(dat.temp$Species) %in% "Araschnia levana"])){
   

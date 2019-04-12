@@ -26,8 +26,48 @@ speciesFIN <- unique(countsFIN$Species_Faunaeur)
 
 stiFIN <-  butterflies_sti[butterflies_sti$id %in% speciesFIN,]
 
+speciesFIN[!speciesFIN %in% stiFIN[,1]]
 
 ##### Calculate CTI #####
+
+countsFIN$month <- lubridate::month(
+  as.Date(
+    do.call(
+      rbind,
+      lapply(strsplit(as.character(countsFIN$Date), " "),
+             function(x)x[1])
+    ),
+    format = "%d.%m.%Y")
+)
+# countsFIN <- countsFIN %>% group_by(Year, Site) %>% mutate(n = length(unique(month))) %>% filter(n >= 5)
+
+# 
+# countsFIN$day <- lubridate::days_in_month(
+#   as.Date(
+#     do.call(
+#       rbind,
+#       lapply(strsplit(as.character(countsFIN$Date), " "), 
+#              function(x)x[1])
+#     ),
+#     format = "%d.%m.%Y")
+# )
+# 
+# 
+# library(RegionalGAM)
+# 
+# countsFIN <- countsFIN[,c(5,1,4,7,8,6)]
+# colnames(countsFIN) <- c("SPECIES","SITE","YEAR","MONTH","DAY","COUNT")
+# # countsFIN <- countsFIN %>% group_by(YEAR, SITE) %>% mutate(n = length(unique(MONTH))) %>% filter(n >= 5)
+# # countsFIN <- countsFIN[,-7]
+# 
+# for(i in unique(countsFIN$SPECIES)){
+#   FC_FIN <- flight_curve(countsFIN[countsFIN$SPECIES == i,], MinVisit = 1, MinOccur = 1)
+#   AI_FIN <- abundance_index(countsFIN[countsFIN$SPECIES == i,], FC_FIN)
+#   write.csv(AI_FIN, paste0("../gam_fin/gam_est_", i, ".csv"), row.names = F)
+# }
+# 
+# countsFIN_gam <- do.call(rbind, lapply(list.files("../gam_fin/", full.names = T), read.csv))
+
 
 maxCounts_Site_year <- countsFIN %>% group_by(Species_Faunaeur, Year, Site) %>% summarise(Individuals = max(Individuals))
 maxCounts_Site_year <- left_join(maxCounts_Site_year, stiFIN, by = c("Species_Faunaeur" = "id") )

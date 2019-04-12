@@ -171,7 +171,7 @@ sp_site_occupancy_trend.predict <- function(data){
   for(i in 1:length(unique(data$Site))){
     cat(paste("\r",round(i / length(unique(data$Site)), 2)*100,"%"))
     
-    data.temp <- subset(data, data$Site == unique(data$Site)[i] & data$Year > 1991)
+    data.temp <- subset(data, data$Site == unique(data$Site)[i])
     
     for(j in 1:length(unique(data.temp$Species))){
       
@@ -249,7 +249,7 @@ sp_site_Ext <- function(data, lwr, upr){
 
 
 sp_site_occTrend <- function(data, lwr, upr){
-  data <- data %>% group_by(gridCell50) %>% complete(Species, Site, fill = list(pred.then = 0, pred.now = 0))
+  data <- data %>% group_by(gridCell50) %>% tidyr::complete(Species, Site, fill = list(pred.then = 0, pred.now = 0))
   
   res <- data %>% mutate(Trend = ifelse(pred.then > upr & pred.now < lwr, "Extinction", 
                                         ifelse(pred.then > upr & pred.now > lwr, "Persistence", 
@@ -292,7 +292,7 @@ predict_raster <- function(model, scaleList, n = 100){
   return(pred)
 }
 
-predict_raster2 <- function(model, xvar, yvar, cond = NULL, n = 100){
+predict_raster2 <- function(model, xvar, yvar, scaleList, cond = NULL, n = 100){
   require(alphahull)
   require(raster)
   
@@ -329,7 +329,7 @@ predict_raster2 <- function(model, xvar, yvar, cond = NULL, n = 100){
   ah <- a2shp(ah)
   
   pred <- rasterFromXYZ(pred[,c(xvar, yvar, "pred")])
-  # pred <- mask(pred, ah)
+  pred <- mask(pred, ah)
   pred <- as.data.frame(rasterToPoints(pred))
   
   pred$x <- pred$x * scaleList$scale[xvar] + scaleList$center[xvar]
@@ -368,7 +368,8 @@ predict_raster3 <- function(model, xvar, yvar, zvar, n = 100){
   pred <- cbind.data.frame(newdata, pred = pred)
   
   pred <- pred %>% group_by(.dots= c(xvar, yvar)) %>%
-    do(effect = lm(formula = paste("pred ~ ", zvar), data = .)) %>% tidy(effect) %>% dplyr::filter(term == zvar)
+    do(effect = glm(formula = paste("pred ~ ", zvar), data = ., family = "binomial")) %>% 
+    tidy(effect) %>% dplyr::filter(term == zvar)
 
   ah <- ahull(alpha = 5, x = (unique(model@frame[,c(xvar, yvar)]) %>% 
                                 mutate(xvar = jitter(.[,xvar]), yvar = jitter(.[,yvar])))[,3:4])

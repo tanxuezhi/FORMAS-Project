@@ -98,8 +98,12 @@ m.FIN <- lmer(temp ~ Year + X*Y + (1|Site), data = temp_summer_2 %>% filter(coun
 summary(m.FIN)
 summary(m.FIN)$coefficients[2,1:2]
 
-m <- lmer(temp ~ Year + X*Y + (1|Site), data = temp_summer_2)
+m <- lmer(temp ~ Year + (1|Site), data = temp_summer_2)
 summary(m)$coefficients[2,1:2]
+
+m2 <- lmer(temp ~ Y + (1|Site), data = temp_summer_2)
+summary(m2)$coefficients[2,1:2]
+
 
 ####
 
