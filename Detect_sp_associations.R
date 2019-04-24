@@ -6,6 +6,7 @@ library(landscapemetrics)
 library(rgeos)
 library(randomForest)
 library(cooccur)
+library(lmerTest)
 
 #####################
 ## background info ##
@@ -33,6 +34,15 @@ countsFIN <- countsFIN %>%
   group_by(Site, Species, Year) %>% 
   summarise(n = max(n)) %>% as.tbl # keep max no. individuals
 
+
+countsNL1 <- readRDS("../Data/Butterflies - Netherlands/AllSpecies_reg_gam_ind_20171206_algroutes.rds") %>% as.tbl %>%
+  dplyr::select(1,2,3,4) %>% rename(n = regional_gam)
+countsNL2 <- rio::import("../Data/Butterflies - Netherlands/MissingSpecies.xlsx") %>% as.tbl %>%
+  dplyr::select(1,3,4,5) %>% rename(n = Ntot, SITE = Site) %>% mutate(n = ifelse(n == -1, 0 , n))
+countsNL <- bind_rows(countsNL1, countsNL2)
+
+countsNL <- countsNL %>% rename(Site = SITE, Species = SPECIES, Year = YEAR)
+
 #############################
 ##### extract site data #####
 #############################
@@ -56,26 +66,34 @@ sites <- read_csv(file = "../Data/Butterflies - Finland/Sites_FIN_ETRS89_landcov
 sites_3035 <- SpatialPoints(sites[,c("X", "Y")], proj4string=CRS("+init=epsg:3035"))
 sites_wgs84 <- spTransform(sites_3035, crs(clim))
 
-## background 
-# back_3035 <- spsample(FIN_3035, 1000, type = "random")
-# back_wgs84 <- spTransform(back_3035, crs(LU))
-
 ## extract temperature data
 sites_temp <- c()
 for(z in unique(countsFIN$Year)){
-  
+  cat(z);cat("\n")
   pre_site_temp <- extract(mean(subset(pre, grep(z, names(pre)))), sites_wgs84)
   tmp_site_temp <- extract(mean(subset(tmp, grep(z, names(tmp)))), sites_wgs84)
   tmn_site_temp <- extract(mean(subset(tmn, grep(z, names(tmn)))), sites_wgs84)
   tmx_site_temp <- extract(mean(subset(tmx, grep(z, names(tmx)))), sites_wgs84)
   
-  sites_temp <- rbind.data.frame(
-    cbind.data.frame(sites[,1], Year = z,
-                     pre = pre_site_temp, tmp = tmp_site_temp, tmn = tmn_site_temp, tmx = tmx_site_temp)
+  sites_temp <- rbind.data.frame(sites_temp,
+                                 cbind.data.frame(sites[,1], Year = z,
+                                                  pre = pre_site_temp, 
+                                                  tmp = tmp_site_temp, 
+                                                  tmn = tmn_site_temp, 
+                                                  tmx = tmx_site_temp)
   )
 }
 
-# back_temp <- extract(clim, back_wgs84)
+sites_clim_pca <- c()
+for(z in unique(countsFIN$Year)){
+  sites_clim_pca_temp <- ade4::dudi.pca(sites_temp[sites_temp$Year == z,-c(1,2)], scannf = F)$li
+  
+  sites_clim_pca <- rbind.data.frame(sites_clim_pca,
+                                     cbind.data.frame(
+                                       sites[,1], Year = z, sites_clim_pca_temp
+                                     ) %>% left_join(sites)
+  )
+}
 
 ## extract land use data
 # sites_LU <- extract(LU, sites_3035)
@@ -146,57 +164,19 @@ for(z in unique(countsFIN$Year)){
 vars <- c("bio1", "bio4", "bio5", "bio6", "bio12", "bio13", "bio14", "bio15")
 
 sites_env <- cbind.data.frame(sites_LU_1000, sites_temp[,vars])
-sites_clim_pca <- cbind.data.frame(sites[,1], ade4::dudi.pca(sites_env[,-c(1:7)], scannf = F)$li) %>% left_join(sites)
 
 # back_env <- cbind.data.frame(back_LU_1000[,-1], back_temp[,vars])
-
-###########################################
-### compute species- and site-specific  ###
-###         habitat suitability         ###
-###########################################
-
-
-# sp_site_suitability <- c()
-# for(i in unique(countsFIN$Species)){
-#   
-#   data_temp_pres <- countsFIN %>% ungroup %>% filter(Species == i) %>% left_join(sites) %>% dplyr::select(1,5,6) %>%
-#     group_by(Site) %>% summarise_all(unique)
-#   # data_temp_abs <- countsFIN %>% filter(!Site %in% data_temp_pres$Site) %>% group_by(Site) %>% summarise(occ = 0)
-#   # data_temp <- bind_rows(data_temp_pres,data_temp_abs)
-#   
-#   # m <- maxent(x = sites_env %>% filter(Site %in% data_temp_pres$Site) %>% dplyr::select(-1) %>% 
-#   #               bind_rows(back_env),
-#   #             p = c(rep(1, nrow(data_temp_pres)), rep(0, nrow(back_env))))
-#   
-#   d <- cbind(occ = c(rep(1, nrow(data_temp_pres)), rep(0, nrow(back_env))), 
-#              sites_env %>% filter(Site %in% data_temp_pres$Site) %>% dplyr::select(-1) %>% 
-#                bind_rows(back_env))
-#   
-#   m <- randomForest(as.factor(occ) ~ ., data = d,
-#                     sampsize = rep(min(table(d$occ)), 2))
-#   
-#   sp_site_suitability <- rbind.data.frame(
-#     sp_site_suitability,
-#     cbind.data.frame(
-#       Species = i, 
-#       Site = sites_env[,1],
-#       suitable = c(rep(1, nrow(data_temp_pres)),
-#                    as.numeric(as.character(predict(m, 
-#                                                    newdata = sites_env %>% 
-#                                                      filter(!Site %in% data_temp_pres$Site)))))
-#     )
-#   )
-#   
-# }
 
 
 #######################################
 ### compute non-random associations ###
 #######################################
 
+data_counts <- countsNL
+
 assoc.Sp2 <- c()
-for(m in c(min(countsFIN$Year) : max(countsFIN$Year))){
-  countsFIN_comm <- countsFIN %>% ungroup() %>% filter(Year == m) %>% mutate(n = 1) %>% 
+for(m in c(min(data_counts$Year) : max(data_counts$Year))){
+  countsFIN_comm <- data_counts %>% ungroup() %>% filter(Year == m) %>% mutate(n = 1) %>% 
     spread(Species, n, fill = 0) %>% as.data.frame %>% 
     mutate(id = paste0(Site,"_",Year)) %>% dplyr::select(-1,-2) %>% column_to_rownames("id")
   countsFIN_comm <- countsFIN_comm[,colSums(countsFIN_comm) > (0.01 * nrow(countsFIN_comm)) & 
@@ -212,32 +192,24 @@ for(m in c(min(countsFIN$Year) : max(countsFIN$Year))){
 }
 assoc.Sp2 <- as.tbl(assoc.Sp2)
 
-# assoc.Sp3 <- assoc.Sp2 %>% mutate(pair = paste(sp1_name, "-", sp2_name)) %>% group_by(pair, association) %>% 
-#   mutate(n.association = n()) %>% group_by(pair) %>% mutate(n.yr = n()) %>%
-#   summarise(association = association[n.association = max(n.association)], 
-#             prop.association = max(n.association)/unique(n.yr),
-#             n.yr = unique(n.yr)) %>%
-#   mutate(association = ifelse(prop.association < 0.7, "Random", association)) %>% filter(n.yr > 4) %>%
-#   separate(pair, c("sp1", "sp2"), sep = " - ")
-
-table(assoc.Sp3$association)
+table(assoc.Sp2$association)
 
 ## with species-site mask ##
-
-sp_site_suitability2 <- countsFIN %>% dplyr::select(-4) %>% ungroup %>% 
-  complete(Species, Year, Site) %>%
-  left_join(sp_site_suitability) %>% mutate(suitable = ifelse(suitable == 1, 1, 0)) %>% 
-  filter(Species %in% colnames(countsFIN_comm)) %>%
-  group_by(Species, Site) %>% spread(Species, suitable) %>% as.data.frame %>% 
-  mutate(id = paste0(Site,"_",Year)) %>% dplyr::select(-1,-2)%>% 
-  filter(id %in% rownames(countsFIN_comm))  %>% column_to_rownames("id")
-
-assoc.Sp <- cooccur(t(countsFIN_comm), type = "spp_site", thresh = F, spp_names = T,
-                    site_mask = t(sp_site_suitability2),
-                    prob = "comb")
-plot(assoc.Sp)
-pair.profile(assoc.Sp)
-obs.v.exp(assoc.Sp)
+# 
+# sp_site_suitability2 <- countsFIN %>% dplyr::select(-4) %>% ungroup %>% 
+#   complete(Species, Year, Site) %>%
+#   left_join(sp_site_suitability) %>% mutate(suitable = ifelse(suitable == 1, 1, 0)) %>% 
+#   filter(Species %in% colnames(countsFIN_comm)) %>%
+#   group_by(Species, Site) %>% spread(Species, suitable) %>% as.data.frame %>% 
+#   mutate(id = paste0(Site,"_",Year)) %>% dplyr::select(-1,-2)%>% 
+#   filter(id %in% rownames(countsFIN_comm))  %>% column_to_rownames("id")
+# 
+# assoc.Sp <- cooccur(t(countsFIN_comm), type = "spp_site", thresh = F, spp_names = T,
+#                     site_mask = t(sp_site_suitability2),
+#                     prob = "comb")
+# plot(assoc.Sp)
+# pair.profile(assoc.Sp)
+# obs.v.exp(assoc.Sp)
 
 
 ## filter interactions ##
@@ -258,13 +230,13 @@ for(l in 1:nrow(assoc.Sp2)){
                                                         Year == assoc.Sp2 %>% slice(l) %>% pull(Year)) %>% 
       filter(!Species %in% sp2) %>% 
       dplyr::select(Site, Year) %>% distinct %>%
-      left_join(sites_env_pca)
+      left_join(sites_clim_pca)
     
     assoc_cond_01 <- countsFIN %>% ungroup() %>% filter(Species %in% sp2, 
                                                         Year == assoc.Sp2 %>% slice(l) %>% pull(Year)) %>% 
       filter(!Species %in% sp1) %>% 
       dplyr::select(Site, Year) %>% distinct %>%
-      left_join(sites_env_pca)
+      left_join(sites_clim_pca)
     
     assoc_cond_merged <- bind_rows("10" = assoc_cond_10, "00" = assoc_cond_01, .id = "assoc")
     
@@ -274,14 +246,13 @@ for(l in 1:nrow(assoc.Sp2)){
                                                         Year == assoc.Sp2 %>% slice(l) %>% pull(Year)) %>% 
       group_by(Site, Year) %>% summarise(n = length(unique(Species))) %>% filter(n > 1) %>%
       dplyr::select(Site, Year) %>% distinct %>%
-      dplyr::select(1) %>% 
-      left_join(sites_env_pca)
+      left_join(sites_clim_pca)
     
     assoc_cond_00 <- countsFIN %>% ungroup() %>% filter(!Species %in% c(sp1, sp2), 
                                                         !Site %in% assoc_cond_11$Site, 
                                                         Year == assoc.Sp2 %>% slice(l) %>% pull(Year)) %>% 
       dplyr::select(Site, Year) %>% distinct %>%
-      left_join(sites_env_pca)
+      left_join(sites_clim_pca)
     
     assoc_cond_merged <- bind_rows("00" = assoc_cond_00, "11" = assoc_cond_11, .id = "assoc")
     
@@ -334,8 +305,12 @@ for(l in 1:nrow(assoc.Sp2)){
   )
 }
 
-res_assoc <- as.tbl(data.frame(res_assoc))
+res_assoc <- as.tbl(res_assoc)
 table(res_assoc$explanation)
+
+
+res_assoc <- res_assoc %>% rename(sp1_name = sp1, sp2_name = sp2)
+
 
 res_assoc[res_assoc$explanation == "Negative_species_interaction",]
 res_assoc[res_assoc$explanation == "Positive_species_interaction",]
@@ -346,36 +321,143 @@ res_assoc[res_assoc$explanation == "Positive_species_interaction",]
 library(emmeans)
 library(lmerTest)
 
-countsFIN %>% group_by(Site, Year) %>% summarise(l = list(unique(Species)))
+library(igraph)
 
-sum.assoc1 <- res_assoc %>% left_join(countsFIN, by = c("sp1" = "Species", "Year" = "Year")) %>% 
-  group_by(Site, Year, explanation) %>% 
-  summarise(n.explanation = n())
-sum.assoc2 <- res_assoc %>% left_join(countsFIN, by = c("sp2" = "Species", "Year" = "Year")) %>% 
-  group_by(Site, Year, explanation) %>% 
-  summarise(n.explanation = n())
-sum.assoc <- bind_rows(sum.assoc1, sum.assoc2) %>% distinct()
+dat_used <- assoc.Sp2
 
-sum.assoc.yr <- sum.assoc %>% group_by(Year) %>% mutate(n.sites = length(unique(Site))) %>%
-  group_by(Year, explanation) %>% summarise(n = sum(n.explanation)/unique(n.sites))
+# optional: if filtered associations are used
+dat_used <- dat_used %>% mutate(association = ifelse(explanation == "Positive_species_interaction", "Aggregated",
+                                                       ifelse(explanation == "Negative_species_interaction", 
+                                                              "Segregated", "Random")))
 
-sum.assoc.yr %>% filter(explanation %in% c("Positive_species_interaction", "Negative_species_interaction")) %>%
-  ggplot(aes(x = Year, y = n, color = explanation)) + geom_point() + geom_line() + 
+net_stat <- c()
+for(i in unique(dat_used$Year)){
+  for(k in c("Aggregated", "Segregated")){
+  dat1 <- dat_used %>% filter(association == k,  Year == i) %>% mutate(sp1_name = as.character(sp1_name),
+                                                                                   sp2_name = as.character(sp2_name)) %>%
+    dplyr::select(sp1_name,sp2_name)
+  
+  g1 <- graph_from_data_frame(dat1, directed = F,
+                              vertices = unique(c(dat1$sp1_name, dat1$sp2_name)))
+
+  net_stat <- rbind.data.frame(net_stat,
+                               cbind.data.frame(Year = i,
+                                                association = k,
+                                                sum = sum(degree(g1)), # sum links
+                                                links_per_sp = mean(degree(g1)), # links per species
+                                                connectance = sum(degree(g1)) / (length(E(g1))^2), # connectance
+                                                modularity = modularity(cluster_walktrap(g1)) # modularity
+                               )
+  )
+  }
+}
+net_stat <- net_stat[net_stat$Year > 1991 & net_stat$Year < 2017,]
+
+par(mfrow=c(2,2))
+res_ag <- subset(net_stat, net_stat$association == "Aggregated")
+plot(sum ~ Year, data = res_ag, type = "b")
+plot(links_per_sp ~ Year, data = res_ag, type = "b")
+plot(connectance ~ Year, data = res_ag, type = "b")
+plot(modularity ~ Year, data = res_ag, type = "b")
+par(mfrow=c(1,1))
+
+par(mfrow=c(2,2))
+res_seg <- subset(net_stat, net_stat$association == "Segregated")
+plot(sum ~ Year, data = res_seg, type = "b")
+plot(links_per_sp ~ Year, data = res_seg, type = "b")
+plot(connectance ~ Year, data = res_seg, type = "b")
+plot(modularity ~ Year, data = res_seg, type = "b")
+par(mfrow=c(1,1))
+
+distri_deg <- c()
+for(i in unique(dat_used$Year)){
+  for(k in c("Aggregated")){
+    dat1 <- dat_used %>% filter(association == k,  Year == i) %>% mutate(sp1_name = as.character(sp1_name),
+                                                                         sp2_name = as.character(sp2_name)) %>%
+      dplyr::select(sp1_name,sp2_name)
+    
+    g1 <- graph_from_data_frame(dat1, directed = F,
+                                vertices = unique(c(dat1$sp1_name, dat1$sp2_name)))
+    
+    distri_deg <- rbind.data.frame(distri_deg,
+                                 cbind.data.frame(Year = i,
+                                                  association = k,
+                                                  degree_distribution = degree_distribution(g1) # modularity
+                                 )
+    )
+  }
+}
+distri_deg %>% ggplot(aes(x = degree_distribution, group = Year, color = Year, fill = Year)) + geom_density(alpha = .5) +
+  theme_classic()
+
+## merge data ##
+sum.assoc1 <- assoc.Sp2 %>% group_by(Year, association, sp1_name) %>% 
+  summarise(n.association = n()) %>% ungroup %>% rename(sp = sp1_name)
+sum.assoc2 <- assoc.Sp2 %>% group_by(Year, association, sp2_name) %>% 
+  summarise(n.association = n()) %>% ungroup %>% rename(sp = sp2_name)
+sum.assoc <- bind_rows(sum.assoc1, sum.assoc2)
+
+connectance <- sum.assoc %>% filter(association == "Aggregated") %>% group_by(Year) %>% mutate = 
+  
+  ## exploratory plots ##
+  sum.assoc.yr <- res_assoc %>% left_join(countsFIN %>% group_by(Year) %>% 
+                                            summarise(n.sites = length(unique(sites)),
+                                                      n.sp = length(unique(Species)))) %>% 
+  group_by(Year, association) %>% summarise(n = n()/unique(n.sp))
+
+sum.assoc.yr %>% filter(association %in% c("Positive_species_interaction", "Negative_species_interaction")) %>%
+  ggplot(aes(x = Year, y = n, color = association)) + geom_point() + geom_line() + 
   geom_smooth() +
-  facet_wrap(~explanation, scales = "free")
+  facet_wrap(~association, scales = "free")
 
-sum.assoc.site <- sum.assoc %>% left_join(sites) %>% left_join(sites_env)
+###
+# Analyses
+###
 
 ## temporal trend ##
+m.all <- glmer(n.explanation ~ Year + (1|Site), family = gaussian(link = log),
+               data = sum.assoc.site %>% group_by(Site, Year) %>%
+                 filter(explanation == "Positive_species_interaction" | explanation == "Negative_species_interaction") %>% 
+                 summarise(n.explanation = sum(n.explanation)) %>%
+                 ungroup %>% mutate(Year = Year - min(Year)))
+summary(m.all)
+cat(paste("Annual change in no. of species associations:",
+          round(((exp(fixef(m.all)[2]) - 1) * 100),2), "%"))
+
+
+
 m.pos <- glmer(n.explanation ~ Year + (1|Site), family = gaussian(link = log),
-               data = sum.assoc %>% filter(explanation == "Positive_species_interaction") %>% 
+               data = sum.assoc.site %>% filter(explanation == "Positive_species_interaction") %>% 
                  ungroup %>% mutate(Year = Year - min(Year)))
 summary(m.pos)
+cat(paste("Annual change in no. of positive species associations:",
+          round(((exp(fixef(m.pos)[2]) - 1) * 100),2), "%"))
 
 m.neg <- glmer(n.explanation ~ Year + (1|Site), family = gaussian(link = log),
-               data = sum.assoc %>% filter(explanation == "Negative_species_interaction") %>% 
+               data = sum.assoc.site %>% filter(explanation == "Negative_species_interaction") %>% 
                  ungroup %>% mutate(Year = Year - min(Year)))
 summary(m.neg)
+cat(paste("Annual change in no. of negative species associations:",
+          round(((exp(fixef(m.neg)[2]) - 1) * 100),2), "%"))
+
+rbind.data.frame(
+  cbind.data.frame(Type = "All\nassociations",
+                   Annual_change = (exp(fixef(m.all)[2]) - 1), 
+                   lwr = (exp(confint(m.all, method = "Wald")[4,1]) - 1),
+                   upr = (exp(confint(m.all, method = "Wald")[4,2]) - 1)),
+  cbind.data.frame(Type = "Positive\nassociations",
+                   Annual_change = (exp(fixef(m.pos)[2]) - 1), 
+                   lwr = (exp(confint(m.pos, method = "Wald")[4,1]) - 1),
+                   upr = (exp(confint(m.pos, method = "Wald")[4,2]) - 1)),
+  cbind.data.frame(Type = "Negative\nassociations",
+                   Annual_change = (exp(fixef(m.neg)[2]) - 1), 
+                   lwr = (exp(confint(m.neg, method = "Wald")[4,1]) - 1),
+                   upr = (exp(confint(m.neg, method = "Wald")[4,2]) - 1))
+) %>% ggplot(aes(x = Type, y = Annual_change)) + 
+  geom_point() + geom_errorbar(aes(ymin = lwr, ymax = upr), width = 0) +
+  geom_abline(aes(intercept = 0, slope = 0), linetype = 2) + theme_grey() + 
+  scale_y_continuous("Annual change", labels = scales::percent) + scale_x_discrete("")
+
 
 ## spatial * temporal trend ##
 m.pos.geo <- glmer(n.explanation ~ Year * (X*Y) + (1|Site), family = gaussian(link = log),
@@ -392,28 +474,30 @@ summary(m.neg.geo)
 dat_temp <- sum.assoc.site %>% filter(explanation == "Positive_species_interaction") %>% ungroup %>%
   mutate(X = scale(X), Y = scale(Y))
 m.pos.env <- glmer(n.explanation ~ X*Y + 
-                     bio1 + bio4 + bio12 + bio15 + 
-                     (1|Site), family = gaussian(link = log),
+                     pre + tmp + 
+                     (1|Site) + (1|Year), family = gaussian(link = log),
                    data = dat_temp, na.action = na.fail)
 summary(m.pos.env)
-d.pos.env <- dredge(m.pos.env)
-avg.pos.env <- model.avg(d.pos.env, subset = delta < 2, fit = T)
 
 
 dat_temp2 <- sum.assoc.site %>% filter(explanation == "Negative_species_interaction") %>% ungroup %>%
   mutate(X = scale(X), Y = scale(Y))
 m.neg.env <- glmer(n.explanation ~ X*Y + 
-                     bio1 + bio4 + bio12 + bio15 + 
-                     (1|Site), family = gaussian(link = log),
+                     pre + tmp + 
+                     (1|Site) + (1|Year), family = gaussian(link = log),
                    data = dat_temp2, na.action = na.fail)
 summary(m.neg.env)
-d.neg.env <- dredge(m.neg.env)
-avg.neg.env <- model.avg(d.neg.env, subset = delta < 2, fit = T)
-
 
 
 ## plots ##
 # spatial trend
+clim <- list(mean(raster::getData("worldclim", var = "prec", res = 2.5)),
+             mean(raster::getData("worldclim", var = "tmean", res = 2.5)),
+             mean(raster::getData("worldclim", var = "tmin", res = 2.5)),
+             mean(raster::getData("worldclim", var = "tmax", res = 2.5)))
+clim <- lapply(clim, function(x)crop(x, extent(FIN_wgs84)))
+
+
 FIN_ras <- projectRaster(clim[[1]], crs = crs(sites_3035))
 FIN_ras <- mask(FIN_ras, FIN_3035)
 
@@ -514,3 +598,10 @@ abline(lm(pred.pos.fac$emmean~pred.neg.fac$emmean))
 par(mfrow=c(1,1))
 
 
+#######################
+## clean environment ##
+#######################
+
+gdata::keep(countsFIN, countsNL,
+            assoc.Sp2,
+            sure=T)
