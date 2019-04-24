@@ -26,13 +26,46 @@ write_csv(dat.occ.trend,"../sp_site_trend_pred.csv")
 
 dat.occ.trend <- read_csv("../sp_site_trend_pred.csv")
 
+sp <- butterflies %>% dplyr::select(3,10:16,22) %>% group_by(Species) %>% summarise_all(first)
+sites <- butterflies %>% dplyr::select(2,5:8, 17:20) %>% group_by(Site, Scale) %>% summarise_all(first)
+
+# dat.Col %>% filter(Species == "Argynnis paphia") %>% 
+#   mutate(diff = pred.now - pred.then, direction = ifelse(diff < 0, "decline", "increase")) %>% pull(direction) %>% table
+# 
+# 
+# sites1 <- butterflies %>% filter(Species == "Argynnis paphia", country == "NL") %>%
+#   dplyr::select(2) %>% distinct %>% pull(Site)
+# 
+# sites10 <- bind_rows(
+#   Present = butterflies %>% filter(Site %in% sites1) %>% dplyr::select(2,5,6) %>% distinct(),
+#   Absent = butterflies %>% filter(!Site %in% sites1, country == "NL") %>% dplyr::select(2,5,6) %>% distinct(), 
+#   .id = "Occupancy")
+# sites10 <- sites10 %>% mutate(Occupancy = factor(Occupancy, levels = c("Absent", "Present")))
+# 
+# ggplot(sites10, aes(x = X, y = Y, color = rev(Occupancy))) + geom_point() +
+#   scale_color_manual(values = c("grey", "black")) + theme_void()
+# 
+# 
+# sites10 <- bind_rows(
+#   Present = butterflies %>% filter(Site %in% sites1) %>% dplyr::select(2,5,6) %>% distinct(),
+#   Absent = butterflies %>% filter(!Site %in% sites1, country == "NL") %>% dplyr::select(2,5,6) %>% distinct(), 
+#   .id = "Occupancy")
+# sites10 <- sites10 %>% mutate(Occupancy = factor(Occupancy, levels = c("Absent", "Present")))
+# 
+# ggplot(sites10, aes(x = X, y = Y, color = rev(Occupancy))) + geom_point() +
+#   scale_color_manual(values = c("grey", "black")) + theme_void()
+
 
 ## summary table
 table_ColExt <- foreach(i = c(1:4)/10, j = rev(c(6:9)/10), .combine = rbind.data.frame) %do%{
-  
-  dat <- sp_site_occTrend(left_join(dat.occ.trend, butterflies %>% dplyr::select(2,8) %>% group_by(Site) %>% summarise_all(first)), i, j)
-  dat.Col <- dat %>% mutate(Colonisation = ifelse(Trend == "Colonisation", 1, ifelse(Trend == "No colonisation", 0, NA)))
-  dat.Ext <- dat %>% mutate(Extinction = ifelse(Trend == "Extinction", 1, ifelse(Trend == "Persistence", 0, NA)))
+
+
+  dat <- sp_site_occTrend(left_join(dat.occ.trend, unique(sites[,c("Site", "gridCell50")])), i, j)
+
+  dat.Col <- dat %>% mutate(Colonisation = ifelse(Trend == "Colonisation", 1, ifelse(Trend == "No colonisation", 0, NA))) %>%
+    dplyr::select(-nYear)
+  dat.Ext <- dat %>% mutate(Extinction = ifelse(Trend == "Extinction", 1, ifelse(Trend == "Persistence", 0, NA))) %>%
+    dplyr::select(-nYear)
   
   cbind.data.frame(thresholds = paste(i, "-", j), rbind.data.frame(
     cbind.data.frame(Type = "Colonisation",
@@ -42,7 +75,7 @@ table_ColExt <- foreach(i = c(1:4)/10, j = rev(c(6:9)/10), .combine = rbind.data
                      dat.Ext %>% group_by(Country = ifelse(grepl("_NL", Site), "NL", "FIN"), Extinction) %>% 
                        summarise(n = n())%>% rename(yes_no = Extinction))
   )
-  )
+  ) %>% filter(!is.na(yes_no))
 }
 
 write.table(table_ColExt, "clipboard")
@@ -51,9 +84,8 @@ write.table(table_ColExt, "clipboard")
 
 table_ColExt_sp <- foreach(i = c(1:4)/10, j = rev(c(6:9)/10), .combine = rbind.data.frame) %do%{
   
-  dat <- sp_site_occTrend(left_join(dat.occ.trend, butterflies %>% dplyr::select(2,8) %>% 
-                                      group_by(Site) %>% 
-                                      summarise_all(first)), i, j)
+  dat <- sp_site_occTrend(left_join(dat.occ.trend, unique(sites[,c("Site", "gridCell50")])), i, j)
+  
   dat.Col <- dat %>% mutate(Colonisation = ifelse(Trend == "Colonisation", 1, ifelse(Trend == "No colonisation", 0, NA)),
                             Country = ifelse(grepl("_NL", Site), "NL", "FIN"))
   dat.Ext <- dat %>% mutate(Extinction = ifelse(Trend == "Extinction", 1, ifelse(Trend == "Persistence", 0, NA)),
@@ -107,21 +139,22 @@ table_ColExt_sp3 <- full_join(table_ColExt_sp2 %>% filter(Country == "NL"),
                               by = "Species")
 
 
-write.table(table_ColExt_sp3, "clipboard_124000")
+write.table(table_ColExt_sp3, "clipboard-124000")
 
 
 registerDoFuture()
 options(future.globals.maxSize = Inf)
-plan(multiprocess, workers = 4)
+plan(multiprocess, workers = 3)
 
 res <- foreach(i = c(1:4)/10, j = rev(c(6:9)/10), .combine = rbind.data.frame) %:% foreach(k = unique(butterflies$Scale), .combine = rbind.data.frame) %dopar%{
   
-  dat <- sp_site_occTrend(left_join(dat.occ.trend, butterflies %>% dplyr::select(2,8) %>% group_by(Site) %>% summarise_all(first)), i, j)
-  dat <- left_join(dat, butterflies %>% dplyr::select(2,3,5,6,8,10:22) %>% group_by(Species, Site, Scale) %>% summarise_all(first))
+  dat <- sp_site_occTrend(left_join(dat.occ.trend, unique(sites[,c("Site", "gridCell50")])), i, j)
+  dat <- left_join(dat, sp) %>% left_join(sites)
   dat <- stdize(dat, prefix = F, omit.cols = c("Trend", "Scale", "pred.then", "pred.now", "nYear"))
   
   dat.Col <- dat %>% mutate(Colonisation = ifelse(Trend == "Colonisation", 1, ifelse(Trend == "No colonisation", 0, NA)))
   dat.Ext <- dat %>% mutate(Extinction = ifelse(Trend == "Extinction", 1, ifelse(Trend == "Persistence", 0, NA)))
+  
   
   m.col <- glmer(Colonisation ~ STI_rel * PC3 + 
                    STI_rel * PC4 + 
@@ -153,19 +186,19 @@ res <- foreach(i = c(1:4)/10, j = rev(c(6:9)/10), .combine = rbind.data.frame) %
                                     Process = "Colonisation",
                                     Range = paste(i,"-", j), 
                                     estimate = fixef(m.col), 
-                                    confint(m.col, method = "boot")[-c(1:3),]) %>% rownames_to_column("Variables"),
+                                    confint(m.col, method = "Wald")[-c(1:3),]) %>% rownames_to_column("Variables"),
                    cbind.data.frame(Scale = k, 
                                     Process = "Extinction",
                                     Range = paste(i,"-", j), 
                                     estimate = fixef(m.ext), 
-                                    confint(m.ext, method = "boot")[-c(1:3),]) %>% rownames_to_column("Variables"))
+                                    confint(m.ext, method = "Wald")[-c(1:3),]) %>% rownames_to_column("Variables"))
 }
 
 names(res)[6:7] <- c("lwr", "upr")
 
-write_csv(res, "../coefs_mods_ColExt.csv")
+write_csv(res, "../coefs_mods_ColExt2.csv")
 
-res <- read_csv("../coefs_mods_ColExt.csv")
+res <- read_csv("../coefs_mods_ColExt2.csv")
 res$Scale <- as.factor(res$Scale)
 levels(res$Scale) <- paste(c(1,3,5,10,20,30,50), "km")
 
@@ -261,18 +294,15 @@ write.table(res2 %>% arrange(Process, Range, Variables), "clipboard-16384", row.
 
 
 ### extract data at scale = 20km and range = 0.2 - 0.8 ###
-dat <- sp_site_occTrend(left_join(dat.occ.trend, butterflies %>% dplyr::select(2,8) %>% group_by(Site) %>% summarise_all(first)), .2, .8)
-table(dat$Trend)
-
-dat <- left_join(dat, butterflies %>% dplyr::select(2,3,5,6,8,10:22) %>% 
-                   group_by(Species, Site, Scale) %>% summarise_all(first))
+dat <- sp_site_occTrend(left_join(dat.occ.trend, unique(sites[,c("Site", "gridCell50")])), .2, .8)
+dat <- left_join(dat, sp) %>% left_join(sites)
 dat <- stdize(dat, prefix = F, omit.cols = c("Trend", "Scale", "pred.then", "pred.now", "nYear"))
 
 dat.Col <- dat %>% mutate(Colonisation = ifelse(Trend == "Colonisation", 1, ifelse(Trend == "No colonisation", 0, NA))) %>%
-  dplyr::filter(Scale == 20000)
+  dplyr::filter(Scale == 20000) %>% dplyr::select(-nYear)
 dat.Col$Habitat <- as.factor(dat.Col$Habitat)
 dat.Ext <- dat %>% mutate(Extinction = ifelse(Trend == "Extinction", 1, ifelse(Trend == "Persistence", 0, NA))) %>%
-  dplyr::filter(Scale == 20000) %>% mutate(Habitat = as.factor(Habitat))
+  dplyr::filter(Scale == 20000) %>% dplyr::select(-nYear)
 dat.Ext$Habitat <- as.factor(dat.Ext$Habitat)
 
 scaleList <- list(scale = attr(dat, "scaled:scale"),
@@ -355,15 +385,16 @@ visreg(m.col, xvar = "PC1", by  ="STI_rel", scale = "response", rug = F, breaks 
        xlab = "Spatial use", legend = F, fill.par=list(col=c("#1C86EE60", "#EEC90060")),
        line.par=list(col=c("#1C86EE", "#EEC900")))
 
+visreg(m.col, xvar = "PC3", by  ="STI_rel", scale = "response", rug = F, breaks = c(-1,1), overlay = T, band = T,
+       xtrans = function(x){x * scaleList$scale["PC3"] + scaleList$center["PC3"]}, ylim = c(0,1),
+       xlab = "Generation time", legend = F, fill.par=list(col=c("#1C86EE60", "#EEC90060")),
+       line.par=list(col=c("#1C86EE", "#EEC900")))
+
 visreg(m.col, xvar = "PC4", by  ="STI_rel", scale = "response", rug = F, breaks = c(-1,1), overlay = T, band = T,
        xtrans = function(x){x * scaleList$scale["PC4"] + scaleList$center["PC4"]}, ylim = c(0,1),
        xlab = "Resource specialisation", legend = F, fill.par=list(col=c("#1C86EE60", "#EEC90060")),
        line.par=list(col=c("#1C86EE", "#EEC900")))
 
-visreg(m.col, xvar = "PC3", by  ="STI_rel", scale = "response", rug = F, breaks = c(-1,1), overlay = T, band = T,
-       xtrans = function(x){x * scaleList$scale["PC3"] + scaleList$center["PC3"]}, ylim = c(0,1),
-       xlab = "Generation time", legend = F, fill.par=list(col=c("#1C86EE60", "#EEC90060")),
-       line.par=list(col=c("#1C86EE", "#EEC900")))
 
 # plot(0,0,axes = F, ann = F, col = "white")
 # legend(x = -1, y = 0, title = "STI", legend = c("Low", "High"), lty = 1, col = c("#1C86EE", "#EEC900"), cex = 1.2, lwd = 1.2, bty = "n")
@@ -377,32 +408,86 @@ visreg(m.ext, xvar = "PC1", by = "STI_rel", scale = "response", rug = F, breaks 
 
 visreg(m.ext, xvar = "PC3", by  ="STI_rel", scale = "response", rug = F, breaks = c(-1,1), overlay = T, band = T,
        xtrans = function(x){x * scaleList$scale["PC3"] + scaleList$center["PC3"]}, ylim = c(0,1),
-       xlab = "Resource specialisation", legend = F, fill.par=list(col=c("#1C86EE60", "#EEC90060")),
+       xlab = "Geenration time", legend = F, fill.par=list(col=c("#1C86EE60", "#EEC90060")),
        line.par=list(col=c("#1C86EE", "#EEC900")))
 
 visreg(m.ext, xvar = "PC4", by  ="STI_rel", scale = "response", rug = F, breaks = c(-1,1), overlay = T, band = T,
        xtrans = function(x){x * scaleList$scale["PC4"] + scaleList$center["PC4"]}, ylim = c(0,1),
-       xlab = "Generation time", legend = F, fill.par=list(col=c("#1C86EE60", "#EEC90060")),
+       xlab = "Resource specialisation", legend = F, fill.par=list(col=c("#1C86EE60", "#EEC90060")),
        line.par=list(col=c("#1C86EE", "#EEC900")))
 
 dev.off()
 
 # landscape x traits
+par(mfrow = c(2,4))
+
+visreg(m.col, xvar = "PLAND", by  ="STI_rel", scale = "response", rug = F, breaks = c(-1,1), overlay = T, band = T,
+       xtrans = function(x){x * scaleList$scale["PLAND"] + scaleList$center["PLAND"]}, ylim = c(0,1),
+       xlab = "Proportion of SNH", legend = F, fill.par=list(col=c("#1C86EE60", "#EEC90060")),
+       line.par=list(col=c("#1C86EE", "#EEC900")))
+
+visreg(m.col, xvar = "PLAND", by  ="PC1", scale = "response", rug = F, breaks = c(-1,1), overlay = T, band = T,
+       xtrans = function(x){x * scaleList$scale["PLAND"] + scaleList$center["PLAND"]}, ylim = c(0,1),
+       xlab = "Proportion of SNH", legend = F, fill.par=list(col=c("#1C86EE60", "#EEC90060")),
+       line.par=list(col=c("#1C86EE", "#EEC900")))
+
+visreg(m.col, xvar = "CLUMPY", by  ="STI_rel", scale = "response", rug = F, breaks = c(-1,1), overlay = T, band = T,
+       xtrans = function(x){x * scaleList$scale["CLUMPY"] + scaleList$center["CLUMPY"]}, ylim = c(0,1),
+       xlab = "Aggregation of SNH", legend = F, fill.par=list(col=c("#1C86EE60", "#EEC90060")),
+       line.par=list(col=c("#1C86EE", "#EEC900")))
+
+visreg(m.col, xvar = "CLUMPY", by  ="PC1", scale = "response", rug = F, breaks = c(-1,1), overlay = T, band = T,
+       xtrans = function(x){x * scaleList$scale["CLUMPY"] + scaleList$center["CLUMPY"]}, ylim = c(0,1),
+       xlab = "Aggregation of SNH", legend = F, fill.par=list(col=c("#1C86EE60", "#EEC90060")),
+       line.par=list(col=c("#1C86EE", "#EEC900")))
+
+visreg(m.ext, xvar = "PLAND", by  ="STI_rel", scale = "response", rug = F, breaks = c(-1,1), overlay = T, band = T,
+       xtrans = function(x){x * scaleList$scale["PLAND"] + scaleList$center["PLAND"]}, ylim = c(0,1),
+       xlab = "Proportion of SNH", legend = F, fill.par=list(col=c("#1C86EE60", "#EEC90060")),
+       line.par=list(col=c("#1C86EE", "#EEC900")))
+
+visreg(m.ext, xvar = "PLAND", by  ="PC1", scale = "response", rug = F, breaks = c(-1,1), overlay = T, band = T,
+       xtrans = function(x){x * scaleList$scale["PLAND"] + scaleList$center["PLAND"]}, ylim = c(0,1),
+       xlab = "Proportion of SNH", legend = F, fill.par=list(col=c("#1C86EE60", "#EEC90060")),
+       line.par=list(col=c("#1C86EE", "#EEC900")))
+
+visreg(m.ext, xvar = "CLUMPY", by  ="STI_rel", scale = "response", rug = F, breaks = c(-1,1), overlay = T, band = T,
+       xtrans = function(x){x * scaleList$scale["CLUMPY"] + scaleList$center["CLUMPY"]}, ylim = c(0,1),
+       xlab = "Aggregation of SNH", legend = F, fill.par=list(col=c("#1C86EE60", "#EEC90060")),
+       line.par=list(col=c("#1C86EE", "#EEC900")))
+
+visreg(m.ext, xvar = "CLUMPY", by  ="PC1", scale = "response", rug = F, breaks = c(-1,1), overlay = T, band = T,
+       xtrans = function(x){x * scaleList$scale["CLUMPY"] + scaleList$center["CLUMPY"]}, ylim = c(0,1),
+       xlab = "Aggregation of SNH", legend = F, fill.par=list(col=c("#1C86EE60", "#EEC90060")),
+       line.par=list(col=c("#1C86EE", "#EEC900")))
 
 # 1
-l1 <- predict_raster2(m.col, xvar = "PLAND", yvar = "CLUMPY", scaleList = scaleList, cond = list(STI_rel = -1))
-l2 <- predict_raster2(m.ext, xvar = "PLAND", yvar = "CLUMPY", scaleList = scaleList, cond = list(STI_rel = -1))
+l1 <- predict_raster2(m.col, xvar = "PLAND", yvar = "CLUMPY", scaleList = scaleList, cond = list(STI_rel = -1, PC1 = -1))
+l2 <- predict_raster2(m.col, xvar = "PLAND", yvar = "CLUMPY", scaleList = scaleList, cond = list(STI_rel = -1, PC1 = 1))
 
-l3 <- predict_raster2(m.col, xvar = "PLAND", yvar = "CLUMPY", scaleList = scaleList, cond = list(STI_rel = 1))
-l4 <- predict_raster2(m.ext, xvar = "PLAND", yvar = "CLUMPY", scaleList = scaleList, cond = list(STI_rel = 1))
+l3 <- predict_raster2(m.col, xvar = "PLAND", yvar = "CLUMPY", scaleList = scaleList, cond = list(STI_rel = 1, PC1 = -1))
+l4 <- predict_raster2(m.col, xvar = "PLAND", yvar = "CLUMPY", scaleList = scaleList, cond = list(STI_rel = 1, PC1 = 1))
 
-landTraitEffect <- bind_rows(
-  "Low STI" = bind_rows(Colonisation = l1, Extinction = l2, .id = "Process"),
-  "High STI" = bind_rows(Colonisation = l3, Extinction = l4, .id = "Process"),
-  .id = "STI")
+l5 <- predict_raster2(m.ext, xvar = "PLAND", yvar = "CLUMPY", scaleList = scaleList, cond = list(STI_rel = -1, PC1 = -1))
+l6 <- predict_raster2(m.ext, xvar = "PLAND", yvar = "CLUMPY", scaleList = scaleList, cond = list(STI_rel = -1, PC1 = 1))
+
+l7 <- predict_raster2(m.ext, xvar = "PLAND", yvar = "CLUMPY", scaleList = scaleList, cond = list(STI_rel = 1, PC1 = -1))
+l8 <- predict_raster2(m.ext, xvar = "PLAND", yvar = "CLUMPY", scaleList = scaleList, cond = list(STI_rel = 1, PC1 = 1))
+
+landTraitEffect <- rbind.data.frame(
+cbind.data.frame(STI = "Low STI", Mobility = "Low spatial use", Process = "Colonisation", l1),
+cbind.data.frame(STI = "Low STI", Mobility = "High spatial use", Process = "Colonisation", l2),
+cbind.data.frame(STI = "High STI", Mobility = "Low spatial use", Process = "Colonisation", l3),
+cbind.data.frame(STI = "High STI", Mobility = "High spatial use", Process = "Colonisation", l4),
+cbind.data.frame(STI = "Low STI", Mobility = "Low spatial use", Process = "Extinction", l5),
+cbind.data.frame(STI = "Low STI", Mobility = "High spatial use", Process = "Extinction", l6),
+cbind.data.frame(STI = "High STI", Mobility = "Low spatial use", Process = "Extinction", l7),
+cbind.data.frame(STI = "High STI", Mobility = "High spatial use", Process = "Extinction", l8)
+)
+
 
 p1 <- ggplot(landTraitEffect %>% filter(Process == "Colonisation"), aes(x = PLAND, y = CLUMPY, fill = pred, z = pred)) +
-  geom_tile() + facet_grid(STI~., scales = "free", drop = F) +
+  geom_tile() + facet_grid(STI + Mobility ~ ., scales = "free", drop = F) +
   scale_fill_gradient(name = "Colonisation\nprobability\n",
                       low=c("gold2"), high = "dodgerblue") +
   scale_x_continuous("Proportion of SNH") + scale_y_continuous("Aggregation of SNH") +
@@ -414,9 +499,9 @@ p1 <- ggplot(landTraitEffect %>% filter(Process == "Colonisation"), aes(x = PLAN
                                       fill="white"))
 
 p2 <- ggplot(landTraitEffect %>% filter(Process == "Extinction"), aes(x = PLAND, y = CLUMPY, fill = pred, z = pred)) +
-  geom_tile() + facet_grid(STI~., scales = "free", drop = F) +
+  geom_tile() + facet_grid(STI + Mobility~ ., scales = "free", drop = F) +
   scale_fill_gradient(name = "Extinction\nprobability\n",
-                      high=c("gold2"), low = "dodgerblue") +
+                      low=c("dodgerblue"), high = "red4") +
   scale_x_continuous("Proportion of SNH") + scale_y_continuous("Aggregation of SNH") +
   stat_contour(color="white", size=0.1) +
   theme_classic() +
@@ -425,9 +510,10 @@ p2 <- ggplot(landTraitEffect %>% filter(Process == "Extinction"), aes(x = PLAND,
         strip.background=element_rect(colour="white", 
                                       fill="white"))
 
-p3 <- cowplot::plot_grid(p1, p2, labels = c("Colonisation", "Extinction"))
 
-cowplot::ggsave("../plot_traitsxLand3.pdf", p3, width = 8, height = 4.5, dpi = 300)
+p3 <- cowplot::plot_grid(p1, p2, nrow = 1)
+
+cowplot::ggsave("../plot_traitsxLand3.pdf", p3, width = 8, height = 6.5, dpi = 300)
 
 # 2
 rm(butterflies); rm(dat); rm(dat.occ.trend); gc()
@@ -446,22 +532,25 @@ landTraitEffect <- bind_rows(
 
 landTraitEffect$Land_var <- as.factor(landTraitEffect$Land_var)
 
-p1 <- ggplot(landTraitEffect %>% filter(Process == "Colonisation"), aes(x= STI_rel, y = PC1, fill = estimate)) +
+p1 <- ggplot(landTraitEffect %>% filter(Process == "Colonisation"), aes(x= STI_rel, y = PC1, fill = estimate, z  =estimate)) +
   geom_tile() + facet_grid(Land_var~., scales = "free", drop = F) +
   scale_fill_gradient2(name = "Effect on \ncolonisation\nprobability\n",
                        low=c("gold2"), high = "dodgerblue", mid  ="light grey") +
   scale_x_continuous("Species temperature index") + scale_y_continuous("Spatial use") +
+  stat_contour(color="white", size=0.1) +
   theme_classic() +
   theme(panel.border=element_blank(),
         strip.text=element_text(size=12, colour="black"),
         strip.background=element_rect(colour="white", 
                                       fill="white"))
 
-p2 <- ggplot(landTraitEffect %>% filter(Process == "Extinction"), aes(x= STI_rel, y = PC1, fill = estimate)) +
+p2 <- ggplot(landTraitEffect %>% filter(Process == "Extinction"), aes(x= STI_rel, y = PC1, fill = estimate, z  =estimate)) +
   geom_tile() + facet_grid(Land_var~., scales = "free") +
   scale_fill_gradient2(name = "Effect on \nextinction\nprobability\n",
                        low=c("dodgerblue"), high = "gold2", mid  ="light grey") +
   scale_x_continuous("Species temperature index") + scale_y_continuous("Spatial use") +
+  stat_contour(color="white", size=0.1) +
+  
   theme_classic() +
   theme(panel.border=element_blank(),
         strip.text=element_text(size=12, colour="black"),

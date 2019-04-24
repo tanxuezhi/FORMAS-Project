@@ -11,7 +11,7 @@ library(tidyverse)
 ##############################################
 ##############################################
 
-lc_class <- as.tbl(rio::import(file = "../Landcover/clc_legend.xls", which = 1L))
+lc_class <- as.tbl(rio::import(file = "../Landcover/Corine_land-cover_2012_raster/clc_legend.xls", which = 1L))
 lc_class$CLC_CODE <- as.integer(lc_class$CLC_CODE)
 
 ###################
@@ -23,7 +23,7 @@ sites_NL <- read_csv(file = "../Data/Butterflies - Netherlands/Sites_NL_ETRS89_l
 sites_FIN <- read_csv(file = "../Data/Butterflies - Finland/Sites_FIN_ETRS89_landcover.csv")
 
 # fragmentation data
-frag_data <- read_csv("../Connectivity/Fragmentation/Frag_indices2.csv")
+frag_data <- read_csv("../Connectivity - Fragmentation/Fragmentation/Frag_indices2.csv")
 
 # temperature data
 temp_data_NL <- read_csv("../Data/temperature_NL.csv")
@@ -66,7 +66,7 @@ cti_PA_butterflies$Site <- paste0(cti_PA_butterflies$Site, "_", cti_PA_butterfli
 but.pts <- SpatialPoints(cti_AB_butterflies[,c("X", "Y")])
 but.r <- raster(ext = extent(but.pts)*1.1, resolution = 50000)
 values(but.r) <- c(1:ncell(but.r))
-gridCell50 <- extract(but.r, but.pts)
+gridCell50 <- raster::extract(but.r, but.pts)
 
 cti_AB_butterflies <- bind_cols(cti_AB_butterflies, gridCell50 = gridCell50)
 cti_PA_butterflies <- bind_cols(cti_PA_butterflies, gridCell50 = gridCell50)
@@ -278,11 +278,16 @@ table((countsFIN %>%
 #butterflies - netherlands
 # occupancy_NL <- read_csv2("../Data/Butterflies - Netherlands/Occupancy_km_Spec_Yr.csv")
 
-countsNL <- readRDS("../Data/Butterflies - Netherlands/AllSpecies_reg_gam_ind_20171206_algroutes.rds") %>% as.tbl
+countsNL1 <- readRDS("../Data/Butterflies - Netherlands/AllSpecies_reg_gam_ind_20171206_algroutes.rds") %>% as.tbl %>%
+  dplyr::select(1,2,3,4) %>% rename(n = regional_gam)
+countsNL2 <- rio::import("../Data/Butterflies - Netherlands/MissingSpecies.xlsx") %>% as.tbl %>%
+  dplyr::select(1,3,4,5) %>% rename(n = Ntot, SITE = Site) %>% mutate(n = ifelse(n == -1, 0 , n))
+countsNL <- bind_rows(countsNL1, countsNL2)
+
 countsNL <- countsNL %>% 
   group_by(SITE) %>%
   complete(YEAR, nesting(SITE, SPECIES)) %>%
-  mutate(n = ifelse(is.na(regional_gam) | regional_gam == 0, 0, 1)) %>%
+  mutate(n = ifelse(is.na(n) | n == 0, 0, 1)) %>%
   rename(Year = YEAR, Site = SITE, Species = SPECIES) %>% dplyr::select(Year,Site,Species,n)
 
 table((countsNL %>% 

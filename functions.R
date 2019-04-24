@@ -298,7 +298,7 @@ predict_raster2 <- function(model, xvar, yvar, scaleList, cond = NULL, n = 100){
   
   newdata <- data.frame(X = median(model@frame$X), Y = median(model@frame$Y),
                         STI_rel = median(model@frame$STI_rel), 
-                        PC1 = rep(c(-1,median(model@frame$PC1),1), each = n^2),
+                        PC1 = median(model@frame$PC1),
                         PC3 = median(model@frame$PC3),
                         PC4 = median(model@frame$PC4),
                         Habitat = "Open", country = "NL", 
@@ -309,10 +309,12 @@ predict_raster2 <- function(model, xvar, yvar, scaleList, cond = NULL, n = 100){
                    expand.grid(seq(min(model@frame[,xvar]), max(model@frame[,xvar]), 
                                    length.out = n), seq(min(model@frame[,yvar]), max(model@frame[,yvar]), 
                                                         length.out = n)))
-  names(newdata)[c((length(names(newdata))-1), length(names(newdata)))] <- c(xvar, yvar)
+  newdata <- newdata[rep(seq_len(nrow(newdata)), length(cond)), ]
+  
+    names(newdata)[c((length(names(newdata))-1), length(names(newdata)))] <- c(xvar, yvar)
   
   if(!is.null(cond)){
-    newdata[,names(cond)] <- cond[[1]]
+    newdata[,names(cond)] <- cond
   }
   
   # newdata <- newdata %>% mutate(PC12 = ifelse(PC11 == model$frame[which.min(abs(model$frame$PC11 - (-1))),"PC11"],
@@ -325,11 +327,11 @@ predict_raster2 <- function(model, xvar, yvar, scaleList, cond = NULL, n = 100){
   pred <- cbind.data.frame(newdata, pred = pred)
   # pred <- subset(pred, PC1 == median(model@frame$STI_rel))
 
-  ah <- ahull(alpha = 4, x = unique(model@frame[,c(xvar, yvar)]))
-  ah <- a2shp(ah)
+  # ah <- ahull(alpha = 4, x = unique(model@frame[,c(xvar, yvar)]))
+  # ah <- a2shp(ah)
   
   pred <- rasterFromXYZ(pred[,c(xvar, yvar, "pred")])
-  pred <- mask(pred, ah)
+  # pred <- mask(pred, ah)
   pred <- as.data.frame(rasterToPoints(pred))
   
   pred$x <- pred$x * scaleList$scale[xvar] + scaleList$center[xvar]
@@ -371,12 +373,12 @@ predict_raster3 <- function(model, xvar, yvar, zvar, n = 100){
     do(effect = glm(formula = paste("pred ~ ", zvar), data = ., family = "binomial")) %>% 
     tidy(effect) %>% dplyr::filter(term == zvar)
 
-  ah <- ahull(alpha = 5, x = (unique(model@frame[,c(xvar, yvar)]) %>% 
-                                mutate(xvar = jitter(.[,xvar]), yvar = jitter(.[,yvar])))[,3:4])
-  ah <- a2shp(ah)
+  # ah <- ahull(alpha = 5, x = (unique(model@frame[,c(xvar, yvar)]) %>% 
+  #                               mutate(xvar = jitter(.[,xvar]), yvar = jitter(.[,yvar])))[,3:4])
+  # ah <- a2shp(ah)
   
   pred <- rasterFromXYZ(pred[,c(xvar, yvar, "estimate")])
-  pred <- mask(pred, ah)
+  # pred <- mask(pred, ah)
   pred <- as.data.frame(rasterToPoints(pred))
   
   pred$x <- pred$x * scaleList$scale[xvar] + scaleList$center[xvar]

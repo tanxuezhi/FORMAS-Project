@@ -165,7 +165,7 @@ ggplot(pred, aes(x= x, y = y, fill = estimate)) + geom_raster() + facet_wrap(~Sc
 ############
 
 mod20 <-   lmer(cti ~ CLUMPY * PLAND * Year + Habitat * Year + X*Y + (Year|gridCell50/Site), 
-                data = dat %>% dplyr:::filter(Scale == 20000))
+                data = dat %>% dplyr:::filter(Scale == 20000)) # do not standardize !!
 
 
 percentiles_percountry <- dat %>% dplyr:::filter(Scale == 20000) %>% group_by(Site) %>% 
@@ -219,10 +219,10 @@ m <- lmer(temp ~ Year + X*Y + (1|Site), data = temp_summer_2)
 
 
 # median frag:
-0.001997671  / (-fixef(cti_spat_trend)[2] * 1000)
+0.002064154   / (-fixef(cti_spat_trend)[2] * 1000)
 
 # low frag:
-0.008198834 / (-fixef(cti_spat_trend)[2] * 1000)
+0.008174396 / (-fixef(cti_spat_trend)[2] * 1000)
 
 # climate across all sites 1991-2016:
 0.027318398 / (-(-2.953940e-06) * 1000)

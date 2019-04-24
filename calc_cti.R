@@ -70,10 +70,12 @@ countsFIN$month <- lubridate::month(
 
 
 maxCounts_Site_year <- countsFIN %>% group_by(Species_Faunaeur, Year, Site) %>% summarise(Individuals = max(Individuals))
-maxCounts_Site_year <- left_join(maxCounts_Site_year, stiFIN, by = c("Species_Faunaeur" = "id") )
+maxCounts_Site_year <- left_join(maxCounts_Site_year, stiFIN, by = c("Species_Faunaeur" = "id") ) 
 
-cti_AB <- maxCounts_Site_year %>% group_by(Year, Site) %>% summarise(cti = weighted.mean(STI, Individuals))
-cti_PA <- maxCounts_Site_year %>% group_by(Year, Site) %>% summarise(cti = mean(STI))
+cti_AB <- maxCounts_Site_year %>% filter(!Species_Faunaeur %in% "Vanessa cardui") %>% 
+  group_by(Year, Site) %>% summarise(cti = weighted.mean(STI, Individuals))
+cti_PA <- maxCounts_Site_year %>% filter(!Species_Faunaeur %in% "Vanessa cardui") %>%
+  group_by(Year, Site) %>% summarise(cti = mean(STI))
 
 ##### Write CTI data #####
 write.csv(cti_AB, "../Data/Butterflies - Finland/CTI_Abundance_FINLAND_1999-2016.csv", row.names = F)
