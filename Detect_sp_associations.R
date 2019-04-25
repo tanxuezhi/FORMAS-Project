@@ -24,6 +24,18 @@ expanding_species <- countsFIN %>% group_by(Year) %>% mutate(nSites_tot = length
 #################
 
 ##### butterfly data ######
+# traits to merge names
+traits.butterflies <- as.tbl(read_csv("../Data/Traits/SpeciesTraits_WDV2014.csv"))
+traits.butterflies[grep("Colias croceus", traits.butterflies$Scientific_name), "Scientific_name"] <- "Colias crocea"
+traits.butterflies[grep("walbum", traits.butterflies$Scientific_name), "Scientific_name"] <- "Satyrium w-album"
+traits.butterflies[grep("Neozephyrus quercus", traits.butterflies$Scientific_name), "Scientific_name"] <- "Favonius quercus"
+traits.butterflies[grep("lycaon", traits.butterflies$Scientific_name), "Scientific_name"] <- "Hyponephele lycaon"
+traits.butterflies[grep("Polygonia", traits.butterflies$Scientific_name), "Scientific_name"] <- "Nymphalis c-album"
+traits.butterflies[grep("Inachis io", traits.butterflies$Scientific_name), "Scientific_name"] <- "Aglais io"
+traits.butterflies[grep("tithonus", traits.butterflies$Scientific_name), "Scientific_name"] <- "Pyronia tithonus"
+traits.butterflies[grep("alcon", traits.butterflies$Scientific_name), "Scientific_name"] <- "Phengaris alcon"
+
+
 # FIN
 countsFIN1 <- fread("../Data/Butterflies - Finland/FINLAND_Records_1999-2015.txt", sep = ";", h=T)
 countsFIN2 <- fread("../Data/Butterflies - Finland/FINLAND_Records_2016.txt", sep = ";", h=T)[,-6]
@@ -35,14 +47,30 @@ countsFIN <- countsFIN %>%
   group_by(Site, Species, Year) %>% 
   summarise(n = max(n)) %>% ungroup %>% as.tbl # keep max no. individuals
 
+countsFIN$Site <- paste0(countsFIN$Site, "_FIN")
+
+countsFIN <- countsFIN %>% filter(n > 0)
+
 # NL
 countsNL1 <- readRDS("../Data/Butterflies - Netherlands/AllSpecies_reg_gam_ind_20171206_algroutes.rds") %>% as.tbl %>%
+  filter(prop_pheno_sampled > 0.5) %>%
   dplyr::select(1,2,3,4) %>% rename(n = regional_gam)
 countsNL2 <- rio::import("../Data/Butterflies - Netherlands/MissingSpecies.xlsx") %>% as.tbl %>%
   dplyr::select(1,3,4,5) %>% rename(n = Ntot, SITE = Site) %>% mutate(n = ifelse(n == -1, 0 , n))
 countsNL <- bind_rows(countsNL1, countsNL2)
 
 countsNL <- countsNL %>% rename(Site = SITE, Species = SPECIES, Year = YEAR)
+countsNL$Site <- paste0(countsNL$Site, "_NL")
+countsNL <- countsNL %>% filter(n > 0)
+countsNL$Species <- gsub("       ", "", countsNL$Species)
+
+
+countsNL <- left_join(countsNL,
+                       traits.butterflies %>% mutate(Species = casefold(Species)) %>% dplyr:::select(1,2)) %>%
+  dplyr::select(-2) %>%
+  rename(Species = Scientific_name)
+
+countsNL[is.na(countsNL$Species), "Species"] <- "Melitaea aurelia"
 
 
 ##### birds data ######
@@ -69,14 +97,121 @@ colnames(countsSWE) <- gsub ("yr", "Year", colnames(countsSWE))
 countsSWE <- countsSWE %>% filter(n > 0)
 
 
-#######################################
-### compute non-random associations ###
-#######################################
-
+### merge ###
 data_counts <- bind_rows("NL" = countsNL %>% filter(Year > 1991 & Year < 2017) %>% mutate(Site = as.character(Site)),
                          "FIN" = countsFIN %>% mutate(Site = as.character(Site)),
                          "SWE" = countsSWE %>% mutate(Species = as.character(Species)),
                          .id = "Data")
+
+#############################
+##### extract site data #####
+#############################
+
+## load climate data ##
+pre <- stack(lapply(list.files("//storage.slu.se/Home$/yofo0001/My Documents/Recherche/CRU_data\\pre", full.names = T), function(x)(stack(x))))
+tmp <- stack(lapply(list.files("//storage.slu.se/Home$/yofo0001/My Documents/Recherche/CRU_data\\tmp", full.names = T), function(x)(stack(x))))
+tmn <- stack(lapply(list.files("//storage.slu.se/Home$/yofo0001/My Documents/Recherche/CRU_data\\tmn", full.names = T), function(x)(stack(x))))
+tmx <- stack(lapply(list.files("//storage.slu.se/Home$/yofo0001/My Documents/Recherche/CRU_data\\tmx", full.names = T), function(x)(stack(x))))
+
+## site data ##
+sitesFIN <- read_csv(file = "../Data/Butterflies - Finland/Sites_FIN_ETRS89_landcover.csv")
+sitesFIN$Site <- paste0(sitesFIN$Site, "_FIN")
+sitesNL <- read_csv(file = "../Data/Butterflies - Netherlands/Sites_NL_ETRS89_landcover.csv")
+sitesNL$Site <- paste0(sitesNL$Site, "_NL")
+sitesSWE <- read_csv(file = "../Data/Birds - Sweden/Sites_SWE_ETRS89_landcover.csv")
+
+sites <- bind_rows("NL" = sitesNL,
+                   "FIN" = sitesFIN,
+                   "SWE" = sitesSWE,
+                   .id = "Data")
+
+
+sites_3035 <- SpatialPoints(sites[,c("X", "Y")], proj4string=CRS("+init=epsg:3035"))
+sites_wgs84 <- spTransform(sites_3035, crs(pre))
+
+## extract temperature data
+sites_temp <- c()
+for(z in unique(data_counts$Year)){
+  cat(z);cat("\n")
+  pre_site_temp <- extract(mean(subset(pre, grep(z, names(pre)))), sites_wgs84)
+  tmp_site_temp <- extract(mean(subset(tmp, grep(z, names(tmp)))), sites_wgs84)
+  tmn_site_temp <- extract(mean(subset(tmn, grep(z, names(tmn)))), sites_wgs84)
+  tmx_site_temp <- extract(mean(subset(tmx, grep(z, names(tmx)))), sites_wgs84)
+  
+  sites_temp <- rbind.data.frame(sites_temp,
+                                 cbind.data.frame(sites[,1], Year = z,
+                                                  pre = pre_site_temp, 
+                                                  tmp = tmp_site_temp, 
+                                                  tmn = tmn_site_temp, 
+                                                  tmx = tmx_site_temp)
+  )
+}
+sites_temp$Site <- rep(sites$Site, length(unique(data_counts$Year)))
+
+###########################
+### compute annual SDMs ###
+###########################
+
+dist_sites <- as.matrix(dist(sites_3035@coords))
+colnames(dist_sites) <- sites$Site
+rownames(dist_sites) <- sites$Site
+
+
+suitability <- c()
+for(j in unique(data_counts$Data)){
+  dat_temp1 <- data_counts %>% filter(Data == j)
+  
+  
+  for(i in unique(data_counts$Year)){
+    
+    dat_temp2 <- dat_temp1 %>% filter(Year == i)
+    
+    for(k in unique(dat_temp2$Species)){
+      
+      sp_obs <- dat_temp2 %>% filter(Species == k)
+      sp_No_obs <- dat_temp2 %>% filter(!Site %in% sp_obs$Site) %>% mutate(n = 0, Species = unique(sp_obs$Species)) %>% 
+        unique()
+      
+      sp_dat <- bind_rows(sp_obs, sp_No_obs) %>% left_join(sites_temp) %>% na.omit()
+      
+      m <- NULL
+      tryCatch({
+        m <- mahal(sp_dat %>% filter(n > 0) %>% dplyr::select(6:9))
+        pred <- predict(m, sp_dat %>% dplyr::select(6:9))
+        pred <- 1/(-pred + 1 + 1)
+        
+        suitability <-  rbind.data.frame(suitability,
+                                         cbind.data.frame(Data = j, 
+                                                          Year = i, 
+                                                          Species = k, 
+                                                          Site = sp_dat$Site, 
+                                                          suitability = pred)
+        )
+      }, error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+      
+      if(is.null(m)){
+        
+        centroid = colMeans(sp_dat %>% filter(n > 0) %>% dplyr::select(6:9))
+
+        pred <- c(rep(1, nrow(sp_dat %>% filter(n > 0))),
+                      1/(apply(sp_dat %>% filter(n == 0) %>% dplyr::select(6:9), 1, function(x)dist(rbind(x, centroid)))+1))
+        suitability <-  rbind.data.frame(suitability,
+                                         cbind.data.frame(Data = j, 
+                                                          Year = i, 
+                                                          Species = k, 
+                                                          Site = sp_dat$Site, 
+                                                          suitability = pred)
+        )
+      }
+      
+    }
+  }
+}
+
+
+#######################################
+### compute non-random associations ###
+#######################################
 
 assoc.Sp <- c()
 for(n in unique(data_counts$Data)){
@@ -311,7 +446,11 @@ distri_deg  %>% group_by(Data, Year, association) %>%
 ## clean environment ##
 #######################
 
-gdata::keep(data_counts,
+gdata::keep(sites,
+            sites_temp,
+            dist_sites,
+            data_counts,
+            suitability,
             assoc.Sp,
             net_stat, distri_deg,
             sure=T)
