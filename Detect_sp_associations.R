@@ -4,11 +4,14 @@ library(raster)
 library(sp)
 # library(landscapemetrics)
 library(rgeos)
-library(netassoc)
+# library(netassoc)
 library(dismo)
 # library(lmerTest)
 library(igraph)
-library(future.apply)
+# library(future.apply)
+library(viridis)
+library(cooccur)
+
 
 
 #####################
@@ -229,6 +232,7 @@ for(j in unique(data_counts$Data)){
 }
 dist_max_sum <- dist_max %>% group_by(Data, Species) %>% summarise(dist_max = max(dist))
 
+### clip by distance to nearest site with species
 
 suitability_clipped <- c()
 for(j in unique(data_counts$Data)){
@@ -276,253 +280,154 @@ for(j in unique(data_counts$Data)){
   }
 }
 
-
-
-#######################################
-### compute non-random associations ###
-#######################################
+#################################
+####        Filter data       ###
+#################################
 data_counts <- data_counts %>% filter(Site %in% sites$Site)
 
 data_counts %>%  group_by(Data) %>% mutate(tot = length(unique(Site))) %>%
   group_by(Data, Year) %>% summarise(n_yr = length(unique(Site)), tot = unique(tot)) %>% 
   group_by(Data) %>% summarise(min = min(n_yr), max = max(n_yr), tot = unique(tot))
 
+data_counts %>% group_by(Data) %>% 
+  summarise(n = length(unique(Year)), min = min(Year), max = max(Year))
 
-data_counts %>%  group_by(Data, Site) %>% summarise(n = length(unique(Year)), min = min(Year), max = max(Year)) %>%
-  filter(n > 10)
+## keep sites surveyed more than 70% of years
+sel_sites <- data_counts %>%  group_by(Data, Site) %>% summarise(n = length(unique(Year)), min = min(Year), max = max(Year)) %>%
+  group_by(Data) %>%
+  mutate(keep = ifelse(unique(Data) == "NL" & n > 17, "Yes", 
+                       ifelse(unique(Data) == "FIN" & n > 12, "Yes", 
+                              ifelse(unique(Data) == "SWE" & n > 14, "Yes","No")))) %>%
+  filter(keep %in% "Yes", !Data %in% "FIN") %>% pull(Site)
+
+data_counts_filtered <- data_counts %>% filter(Site %in% sel_sites)
 
 
-plan(multiprocess, workers = 3)
+#######################################
+### compute non-random associations ###
+#######################################
 
-assoc.Sp <-  vector(mode="list", 3)
+assoc.Sp <-  vector(mode="list", 2)
 aa = 0 
-for(n in unique(data_counts$Data)){
-  data_counts_temp <- data_counts[data_counts$Data == n,]
-  suitability_temp <- suitability_clipped[suitability_clipped$Data == n,]
+for(n in unique(data_counts_filtered$Data)){
+  data_counts_temp <- data_counts_filtered[data_counts_filtered$Data == n,]
+  suitability_temp <- suitability[suitability$Data == n,]
   
   aa = aa + 1
-  
   bb = 0
-  
-  n_samp  <- ifelse(unique(data_counts_temp$Data) == "FIN", 30, ifelse(unique(data_counts_temp$Data) == "NL", 192, 48))
-  
   
   for(m in c(min(data_counts_temp$Year) : max(data_counts_temp$Year))){
     
+    cat(paste("Data:", n))
+    cat("\n")
+    cat(paste("Year:", m))
+    cat("\n")
+    cat("\n")
+    
+    
     bb = bb + 1
     
-    assoc_test <- function(n_samp){
-      obs_comm <- data_counts_temp %>% ungroup() %>% filter(Year == m)
-      obs_comm <- obs_comm %>%filter(Site %in% unique(Site)[sample(1:length(unique(Site)), n_samp)]) %>% 
-        spread(Species, n, fill = 0) %>% as.data.frame %>% 
-        mutate(id = paste0(Site,"_",Year)) %>% dplyr::select(-Site,-Year,-Data) %>% column_to_rownames("id")
-      
-      null_comm <- suitability_temp %>% ungroup() %>% 
-        filter(Year == m, Site %in% substr(rownames(obs_comm),1,nchar(rownames(obs_comm))-5),
-               Species %in% colnames(obs_comm)) %>% 
-        spread(Species, suitability, fill = 0) %>% as.data.frame %>% 
-        mutate(id = paste0(Site,"_",Year)) %>% dplyr::select(-Site,-Year,-Data) %>% column_to_rownames("id")
-      null_comm <- null_comm[order(rownames(null_comm)),order(colnames(null_comm))]
-      
-      net_test <- make_netassoc_network(
-        obs = t(obs_comm),
-        nul = t(null_comm),
-        numnulls = 1000, 
-        plot = F,
-        verbose = F
-      )
-      
-      return(net_test)
-    }
+    obs_comm <- data_counts_temp %>% ungroup() %>% filter(Year == m) %>% 
+      mutate(n = ifelse(n > 0, 1, 0)) %>%
+      spread(Species, n, fill = 0) %>% as.data.frame %>% 
+      mutate(id = paste0(Site,"_",Year)) %>% dplyr::select(-Site,-Year,-Data) %>% column_to_rownames("id")
     
-    net_test_rep <- future_replicate(100, assoc_test(n_samp = n_samp), simplify = F)
+    null_comm <- suitability_temp %>% ungroup() %>% 
+      filter(Year == m, Site %in% substr(rownames(obs_comm),1,nchar(rownames(obs_comm))-5),
+             Species %in% colnames(obs_comm)) %>% mutate(suitability = ifelse(suitability > .5, 1, 0)) %>%
+      spread(Species, suitability, fill = 0) %>% as.data.frame %>% 
+      mutate(id = paste0(Site,"_",Year)) %>% dplyr::select(-Site,-Year,-Data) %>% column_to_rownames("id")
+    null_comm <- null_comm[order(rownames(null_comm)),order(colnames(null_comm))]
     
-    assoc.Sp[[aa]][[bb]] <- net_test_rep
+    
+    net_test <- cooccur(
+      mat = t(obs_comm),
+      site_mask = t(null_comm),
+      type = "spp_site",
+      spp_names = T,
+      prob = "comb",
+      thresh = F
+    )
+    
+    net_test_dat <- net_test$results %>% 
+      mutate(type = ifelse(p_gt < .05, "Positive", ifelse(p_lt < .05, "Negative", "Random")))
+    
+    net_test_neg <- net_test_dat %>% filter(type == "Negative")
+    net_test_neg <- graph_from_data_frame(net_test_neg[,10:11], directed = F)
+    
+    
+    net_test_pos <- net_test_dat %>% filter(type == "Positive")
+    net_test_pos <- graph_from_data_frame(net_test_pos[,10:11], directed = F)
+    
+    res <- list(net_test_dat, net_test_pos, net_test_neg)
+    names(res) <- c("Data", "Positive", "Negative")
+    
+    assoc.Sp[[aa]][[bb]] <- res
     
   }
   names(assoc.Sp[[aa]]) <- c(min(data_counts_temp$Year) : max(data_counts_temp$Year))
 }
-names(assoc.Sp) <- unique(data_counts$Data)
+names(assoc.Sp) <- unique(data_counts_filtered$Data)
 
-
-## with species-site mask ##
-# 
-# sp_site_suitability2 <- countsFIN %>% dplyr::select(-4) %>% ungroup %>% 
-#   complete(Species, Year, Site) %>%
-#   left_join(sp_site_suitability) %>% mutate(suitable = ifelse(suitable == 1, 1, 0)) %>% 
-#   filter(Species %in% colnames(countsFIN_comm)) %>%
-#   group_by(Species, Site) %>% spread(Species, suitable) %>% as.data.frame %>% 
-#   mutate(id = paste0(Site,"_",Year)) %>% dplyr::select(-1,-2)%>% 
-#   filter(id %in% rownames(countsFIN_comm))  %>% column_to_rownames("id")
-# 
-# assoc.Sp <- cooccur(t(countsFIN_comm), type = "spp_site", thresh = F, spp_names = T,
-#                     site_mask = t(sp_site_suitability2),
-#                     prob = "comb")
-# plot(assoc.Sp)
-# pair.profile(assoc.Sp)
-# obs.v.exp(assoc.Sp)
-
-
-## filter interactions ##
-# 
-# res_assoc <- c()
-# for(l in 1:nrow(assoc.Sp2)){
-#   
-#   diff_env <- NULL
-#   diff_dist <- NULL
-#   
-#   sp1 <- c(assoc.Sp2 %>% slice(l) %>% pull(sp1_name) %>% as.character)
-#   sp2 <- c(assoc.Sp2 %>% slice(l) %>% pull(sp2_name) %>% as.character)
-#   
-#   
-#   if(assoc.Sp2 %>% slice(l) %>% pull(association) == "Segregated"){
-#     
-#     assoc_cond_10 <- countsFIN %>% ungroup() %>% filter(Species %in% sp1, 
-#                                                         Year == assoc.Sp2 %>% slice(l) %>% pull(Year)) %>% 
-#       filter(!Species %in% sp2) %>% 
-#       dplyr::select(Site, Year) %>% distinct %>%
-#       left_join(sites_clim_pca)
-#     
-#     assoc_cond_01 <- countsFIN %>% ungroup() %>% filter(Species %in% sp2, 
-#                                                         Year == assoc.Sp2 %>% slice(l) %>% pull(Year)) %>% 
-#       filter(!Species %in% sp1) %>% 
-#       dplyr::select(Site, Year) %>% distinct %>%
-#       left_join(sites_clim_pca)
-#     
-#     assoc_cond_merged <- bind_rows("10" = assoc_cond_10, "00" = assoc_cond_01, .id = "assoc")
-#     
-#   } else if(assoc.Sp2 %>% slice(l) %>% pull(association) == "Aggregated"){
-#     
-#     assoc_cond_11 <- countsFIN %>% ungroup() %>% filter(Species %in% c(sp1, sp2), 
-#                                                         Year == assoc.Sp2 %>% slice(l) %>% pull(Year)) %>% 
-#       group_by(Site, Year) %>% summarise(n = length(unique(Species))) %>% filter(n > 1) %>%
-#       dplyr::select(Site, Year) %>% distinct %>%
-#       left_join(sites_clim_pca)
-#     
-#     assoc_cond_00 <- countsFIN %>% ungroup() %>% filter(!Species %in% c(sp1, sp2), 
-#                                                         !Site %in% assoc_cond_11$Site, 
-#                                                         Year == assoc.Sp2 %>% slice(l) %>% pull(Year)) %>% 
-#       dplyr::select(Site, Year) %>% distinct %>%
-#       left_join(sites_clim_pca)
-#     
-#     assoc_cond_merged <- bind_rows("00" = assoc_cond_00, "11" = assoc_cond_11, .id = "assoc")
-#     
-#   }
-#   
-#   association <- assoc.Sp2 %>% slice(l) %>% pull(association)
-#   
-#   if(association != "Random"){
-#     diff_env <- summary(manova(cbind(Axis1, Axis2) ~ assoc, data = assoc_cond_merged))$stat[1,6]
-#     diff_dist <- summary(manova(cbind(X, Y) ~ assoc, data = assoc_cond_merged))$stat[1,6]
-#   }
-#   
-#   
-#   if(association == "Random"){
-#     explanation <- "Random"
-#   } else if(association == "Aggregated"){
-#     if(diff_dist < 0.05){
-#       if(diff_env < 0.05){
-#         explanation <- "Dispersal_limitation_or_environmental_filtering"
-#       } else {
-#         explanation <- "Dispersal_limitation"
-#       }
-#     } else {
-#       if(diff_env < 0.05){
-#         explanation <- "Environmental_filtering"
-#       } else {
-#         explanation <- "Positive_species_interaction"
-#       }
-#     }
-#   } else if(association == "Segregated"){
-#     if(diff_dist < 0.05){
-#       if(diff_env < 0.05){
-#         explanation <- "Dispersal_limitation_or_environmental_filtering"
-#       } else {
-#         explanation <- "Dispersal_limitation"
-#       }
-#     } else {
-#       if(diff_env < 0.05){
-#         explanation <- "Environmental_filtering"
-#       } else {
-#         explanation <- "Negative_species_interaction"
-#       }
-#     }
-#   }
-#   
-#   res_assoc <- rbind.data.frame(res_assoc, 
-#                                 cbind.data.frame(sp1 = sp1, sp2 = sp2,
-#                                                  Year = assoc.Sp2[l,"Year"],
-#                                                  association, explanation)
-#   )
-# }
-# 
-# res_assoc <- as.tbl(res_assoc)
-# table(res_assoc$explanation)
-# 
-# 
-# res_assoc <- res_assoc %>% rename(sp1_name = sp1, sp2_name = sp2)
-# 
-# 
-# res_assoc[res_assoc$explanation == "Negative_species_interaction",]
-# res_assoc[res_assoc$explanation == "Positive_species_interaction",]
 
 ############################
 ## change in cooccurrence ##
 ############################
 
-dat_used <- assoc.Sp
-
-# optional: if filtered associations are used
-# dat_used <- dat_used %>% mutate(association = ifelse(explanation == "Positive_species_interaction", "Aggregated",
-# ifelse(explanation == "Negative_species_interaction", 
-# "Segregated", "Random")))
-
 net_stat <- c()
-for(l in 1:length(dat_used)){
-  dat2 <- dat_used[[l]] 
+for(l in 1:length(assoc.Sp)){
+  dat2 <- assoc.Sp[[l]] 
   for(i in 1:length(dat2)){
-    for(j in 1:length(dat2[[i]])){
-      for(k in c("network_pos", "network_neg")){
-        
-        g1 <- dat2[[i]][[j]][[k]]
-        
-        net_stat <- rbind.data.frame(net_stat,
-                                     cbind.data.frame(Data = names(dat_used)[l],
-                                                      Year = names(dat2)[i],
-                                                      association = ifelse(k == "network_pos", "Positive", "Negative"),
-                                                      sum = sum(degree(g1)), # sum links
-                                                      Link_density = mean(degree(g1)), # links per species
-                                                      Connectance = sum(degree(g1)) / (length(E(g1))^2), # connectance
-                                                      Modularity = modularity(cluster_walktrap(g1)) # modularity
-                                     )
-        )
-      } 
+    for(k in c("Positive", "Negative")){
+      
+      g1 <- dat2[[i]][[k]]
+      
+      net_stat <- rbind.data.frame(net_stat,
+                                   cbind.data.frame(Data = names(assoc.Sp)[l],
+                                                    Year = names(dat2)[i],
+                                                    association = k,
+                                                    sum = sum(degree(g1)), # sum links
+                                                    Link_density = mean(degree(g1)), # links per species
+                                                    Connectance = sum(degree(g1)) / (length(E(g1))^2), # connectance
+                                                    Modularity = modularity(cluster_walktrap(g1)) # modularity
+                                   )
+      )
     }
   }
 }
 
-#plot quantiles
-net_stat %>% gather(-1,-2,-3, -4, key = "type", value = "value") %>% group_by(Data, Year, association, type) %>%
-  summarise(upr = quantile(value, probs = c(.05,0.5,.95), na.rm = T)[1], 
-            lwr = quantile(value, probs = c(.05,0.5,.95), na.rm = T)[3],
-            median = quantile(value, probs = c(.05,0.5,.95), na.rm = T)[2]) %>% 
-  filter(association == "Positive") %>% ungroup() %>% 
+net_stat %>% gather(-1,-2,-3, -4, key = "type", value = "value") %>% 
+  filter(type == "Connectance") %>% ungroup() %>% 
   mutate(Year = as.numeric(as.character(Year))) %>% filter(Year < 2017) %>%
-  ggplot(aes(ymin = lwr, ymax = upr, y = median, x = Year, fill = Data)) + 
-  geom_line(aes(color = Data)) + 
-  geom_ribbon(alpha = .5) + 
-  facet_wrap(Data~type, scales = "free") + 
-  theme_bw()
+  ggplot(aes(y = value, x = Year, color = Data, fill = Data)) + 
+  geom_point() + 
+  geom_line() + 
+  geom_smooth(alpha = .3) +
+  facet_grid(Data~association, scales = "free_y") + 
+  theme_bw() + scale_color_viridis(discrete=TRUE) + scale_fill_viridis(discrete=TRUE) +
+  ggtitle("Connectance")
 
-#plot mean
-net_stat %>% gather(-1,-2,-3, -4, key = "type", value = "value") %>% group_by(Data, Year, association, type) %>%
-  summarise(value = median(value, na.rm = T)) %>% 
-  filter(association == "Positive") %>% ungroup() %>% 
+net_stat %>% gather(-1,-2,-3, -4, key = "type", value = "value") %>% 
+  filter(type == "Modularity") %>% ungroup() %>% 
   mutate(Year = as.numeric(as.character(Year))) %>% filter(Year < 2017) %>%
-  ggplot(aes(y = value, x = Year)) + 
-  geom_line(aes(color = Data)) + 
-  facet_wrap(Data~type, scales = "free_y") + 
-  theme_bw()
+  ggplot(aes(y = value, x = Year, color = Data, fill = Data)) + 
+  geom_point() + 
+  geom_line() + 
+  geom_smooth(alpha = .3) +
+  facet_grid(Data~association, scales = "free_y") + 
+  theme_bw() + scale_color_viridis(discrete=TRUE) + scale_fill_viridis(discrete=TRUE) +
+  ggtitle("Modularity")
+
+net_stat %>% gather(-1,-2,-3, -4, key = "type", value = "value") %>% 
+  filter(type == "Link_density") %>% ungroup() %>% 
+  mutate(Year = as.numeric(as.character(Year))) %>% filter(Year < 2017) %>%
+  ggplot(aes(y = value, x = Year, color = Data, fill = Data)) + 
+  geom_point() + 
+  geom_line() + 
+  geom_smooth(alpha = .3) +
+  facet_grid(Data~association, scales = "free_y") + 
+  theme_bw() + scale_color_viridis(discrete=TRUE) + scale_fill_viridis(discrete=TRUE) +
+  ggtitle("Link density")
 
 
 distri_deg <- c()
