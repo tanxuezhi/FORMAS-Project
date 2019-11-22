@@ -31,9 +31,9 @@ data <- butterflies.data.presence %>% dplyr::filter(Scale == 50000) %>%
 
 ggplot(data, aes(x = X, y = Y, color = nYear)) + geom_point(alpha = .5) + 
   scale_color_gradientn(name = "No. years \n", 
-                       breaks =  c(1,max(data$nYear)),
-                       limits = c(1,max(data$nYear)),
-                       colours = c("yellow","red")) +
+                        breaks =  c(1,max(data$nYear)),
+                        limits = c(1,max(data$nYear)),
+                        colours = c("yellow","red")) +
   scale_x_continuous("Longitude") + scale_y_continuous("Latitude")
 
 
@@ -42,7 +42,10 @@ ggplot(data, aes(x = X, y = Y, color = nYear)) + geom_point(alpha = .5) +
 ###############
 
 butterflies.data.presence %>% dplyr::filter(Scale == 50000) %>% group_by(country, Year) %>% Hmisc::describe()
-  
+
+butterflies.data.presence %>% group_by(Site, Scale) %>% summarise(CLUMPY = unique(CLUMPY), PLAND = unique(PLAND)) %>%
+  group_by(Scale) %>% do(cor = cor.test(.$CLUMPY, .$PLAND)) %>% broom::tidy(cor)
+
 ggplot(butterflies.data.presence %>% dplyr:::filter(PLAND < .95 & PLAND > .05) %>% group_by(country, Scale, Habitat) %>%
          distinct(), aes(y = CLUMPY, x = PLAND, color =country)) + 
   geom_point(alpha = .3) + facet_wrap( ~ Scale, labeller = label_wrap) + 
@@ -182,4 +185,89 @@ abline(h = .8, col = "blue", lty = 2)
 abline(h = .2, col = "blue", lty = 2)
 
 
+###########
+### map ###
+###########
 
+library("rnaturalearth")
+library("rnaturalearthdata")
+library(sf)
+library(ggspatial)
+library(sp)
+library(raster)
+library(tidyverse)
+
+world <- ne_countries(scale='medium',returnclass = 'sf')
+
+x <- SpatialPoints(data.frame(x = c(-10, 55, -10, 55), y = c(36, 65, 37, 67)))
+crs(x) <- crs(world)
+spTransform(x, CRSobj = crs("+init=epsg:3035"))
+
+sites <- read_csv("../Data/sites_3035.csv")
+sites <- st_multipoint(as.matrix(sites[,-1]), dim = "XY")
+sites <- st_sfc(sites)
+st_crs(sites) <- "+init=epsg:3035"
+
+sites %>% st_set_crs(3035)
+
+europe <- ggplot(data = world) +
+  geom_sf(fill = "light grey") + 
+  geom_sf(data = world %>% filter(admin == "Finland"), fill = "dimgray") + 
+  geom_sf(data = world %>% filter(admin == "Netherlands"), fill = "dimgray") + 
+  theme(panel.background = element_rect(fill = "azure"),
+        panel.border = element_rect(fill = NA)) +
+  coord_sf(crs = st_crs(3035), xlim = c(2548684, 6283630), ylim = c(1673035, 5371050)) +
+  annotation_scale(location = "bl") +
+  annotation_north_arrow(location = "tl", which_north = "true", 
+                         style = north_arrow_fancy_orienteering) +
+  theme(panel.grid.major = element_blank(), 
+        panel.border = element_rect(fill = NA),
+        axis.title=element_blank(),
+        axis.text=element_blank(),
+        axis.ticks=element_blank())
+
+z <- world %>% filter(admin == "Finland") %>% extent %>% as(., "SpatialPolygons") 
+crs(z) <- crs(world)
+spTransform(z, CRSobj = crs("+init=epsg:3035"))
+
+
+Finland <- ggplot(data = world %>% filter(admin == "Finland")) +
+  geom_sf(fill = "light grey") +
+  geom_sf(data = sites, color=alpha("black",0.2), size = .9) +
+  coord_sf(crs = st_crs(3035), xlim = c(4750000, 5400000), ylim = c(4180000, 5270000)) +
+  theme(panel.grid.major = element_blank(), 
+        panel.background = element_blank(), 
+        panel.border = element_rect(fill = NA)) +
+  ggtitle("Finland", subtitle = "101 sites")
+
+y <- extent(matrix(c(3,50,8,54), ncol = 2)) %>% as(., "SpatialPolygons") 
+crs(y) <- crs(world)
+spTransform(y, CRSobj = crs("+init=epsg:3035"))
+
+NL <- ggplot(data = world %>% filter(admin == "Netherlands")) +
+  geom_sf(fill = "light grey") +
+  geom_sf(data = sites, color=alpha("black",0.2), size = .9) +
+  coord_sf(crs = st_crs(3035), xlim = c(3860000, 4130000), ylim = c(3090000, 3390000)) +
+  theme(panel.grid.major = element_blank(), 
+        panel.background = element_blank(), 
+        panel.border = element_rect(fill = NA)) +
+  ggtitle("Netherlands", subtitle = "976 sites")
+
+arrowA <- data.frame(x1 = 13.5, x2 = 18.5, y1 = 14, y2 = 14.5)
+arrowB <- data.frame(x1 = 8, x2 = 18.5, y1 = 8.5, y2 = 5)
+
+ggplot() +
+  coord_equal(xlim = c(0, 28), ylim = c(0, 20), expand = F) +
+  annotation_custom(ggplotGrob(europe), xmin = 0, xmax = 18, ymin = 0, 
+                    ymax = 20) +
+  annotation_custom(ggplotGrob(Finland), xmin = 17, xmax = 28, ymin = 8.8, 
+                    ymax = 20) +
+  annotation_custom(ggplotGrob(NL), xmin = 17, xmax = 28, ymin = 0, 
+                    ymax = 8.3) +
+  geom_segment(aes(x = x1, y = y1, xend = x2, yend = y2), data = arrowA, 
+               arrow = arrow(), lineend = "round", size = 1.1) +
+  geom_segment(aes(x = x1, y = y1, xend = x2, yend = y2), data = arrowB, 
+               arrow = arrow(), lineend = "round", size = 1.1) +
+  theme_void()
+
+ggsave(file = "../map.pdf", width = 11, height = 8)

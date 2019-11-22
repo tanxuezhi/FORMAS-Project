@@ -13,18 +13,6 @@ library(viridis)
 library(cooccur)
 
 
-
-#####################
-## background info ##
-#####################
-
-expanding_species <- countsFIN %>% group_by(Year) %>% mutate(nSites_tot = length(unique(Site))) %>% group_by(Species, Year) %>%
-  summarise(nSites = length(unique(Site)), nSites_tot = unique(nSites_tot)) %>% group_by(Species) %>%
-  do(trend = glm(cbind(nSites,nSites_tot) ~ Year, family = binomial, data = .)) %>% 
-  broom::tidy(trend) %>% filter(term == "Year") %>% filter(p.value < .05, estimate > 0) %>% arrange(desc(estimate)) %>%
-  pull(Species)
-
-
 #################
 ### load data ###
 #################
@@ -283,14 +271,16 @@ for(j in unique(data_counts$Data)){
 #################################
 ####        Filter data       ###
 #################################
-data_counts <- data_counts %>% filter(Site %in% sites$Site)
-
-data_counts %>%  group_by(Data) %>% mutate(tot = length(unique(Site))) %>%
-  group_by(Data, Year) %>% summarise(n_yr = length(unique(Site)), tot = unique(tot)) %>% 
-  group_by(Data) %>% summarise(min = min(n_yr), max = max(n_yr), tot = unique(tot))
 
 data_counts %>% group_by(Data) %>% 
   summarise(n = length(unique(Year)), min = min(Year), max = max(Year))
+
+data_counts %>% group_by(Data, Year) %>% 
+  summarise(n = length(unique(Site))) %>% 
+  ggplot(aes(x = Year, y = n)) + 
+  geom_point() + 
+  geom_smooth() +
+  facet_grid(~Data)
 
 ## keep sites surveyed more than 70% of years
 sel_sites <- data_counts %>%  group_by(Data, Site) %>% summarise(n = length(unique(Year)), min = min(Year), max = max(Year)) %>%
@@ -300,18 +290,35 @@ sel_sites <- data_counts %>%  group_by(Data, Site) %>% summarise(n = length(uniq
                               ifelse(unique(Data) == "SWE" & n > 14, "Yes","No")))) %>%
   filter(keep %in% "Yes", !Data %in% "FIN") %>% pull(Site)
 
-data_counts_filtered <- data_counts %>% filter(Site %in% sel_sites)
+data_counts_filtered <- data_counts %>% filter(Site %in% sel_sites, Site %in% sites$Site)
 
+data_counts_filtered <- data_counts %>% filter(Year >= 2007)
+data_counts_filtered %>% group_by(Data, Year) %>% 
+  summarise(n = length(unique(Site))) %>% 
+  ggplot(aes(x = Year, y = n)) + 
+  geom_point() + 
+  geom_smooth() +
+  facet_grid(~Data)
+
+
+# check temporal change in latitude
+data_counts_filtered %>% left_join(sites) %>% 
+  group_by(Data, Year) %>% summarise(Y = mean(Y, na.rm = T)) %>%
+  ggplot(aes(y = Y, x = Year)) + geom_point() + facet_wrap(~Data, scale = "free")
+
+data_counts %>% left_join(sites) %>% filter(Data != "FIN") %>%
+  group_by(Data, Year) %>% summarise(Y = mean(Y, na.rm = T)) %>%
+  ggplot(aes(y = Y, x = Year)) + geom_point() + facet_wrap(~Data, scale = "free")
 
 #######################################
 ### compute non-random associations ###
 #######################################
 
-assoc.Sp <-  vector(mode="list", 2)
+assoc.Sp <- vector(mode="list", 3)
 aa = 0 
 for(n in unique(data_counts_filtered$Data)){
   data_counts_temp <- data_counts_filtered[data_counts_filtered$Data == n,]
-  suitability_temp <- suitability[suitability$Data == n,]
+  suitability_temp <- suitability_clipped[suitability_clipped$Data == n,]
   
   aa = aa + 1
   bb = 0
@@ -334,7 +341,7 @@ for(n in unique(data_counts_filtered$Data)){
     
     null_comm <- suitability_temp %>% ungroup() %>% 
       filter(Year == m, Site %in% substr(rownames(obs_comm),1,nchar(rownames(obs_comm))-5),
-             Species %in% colnames(obs_comm)) %>% mutate(suitability = ifelse(suitability > .5, 1, 0)) %>%
+             Species %in% colnames(obs_comm)) %>% mutate(suitability = ifelse(suitability > .8, 1, 0)) %>%
       spread(Species, suitability, fill = 0) %>% as.data.frame %>% 
       mutate(id = paste0(Site,"_",Year)) %>% dplyr::select(-Site,-Year,-Data) %>% column_to_rownames("id")
     null_comm <- null_comm[order(rownames(null_comm)),order(colnames(null_comm))]
@@ -352,12 +359,14 @@ for(n in unique(data_counts_filtered$Data)){
     net_test_dat <- net_test$results %>% 
       mutate(type = ifelse(p_gt < .05, "Positive", ifelse(p_lt < .05, "Negative", "Random")))
     
-    net_test_neg <- net_test_dat %>% filter(type == "Negative")
-    net_test_neg <- graph_from_data_frame(net_test_neg[,10:11], directed = F)
+    net_test_neg <- net_test_dat %>% filter(type == "Negative") %>% 
+      mutate(weight = abs(scale(obs_cooccur) - scale(exp_cooccur)))
+    net_test_neg <- graph_from_data_frame(net_test_neg[,c(10:11,13)], directed = F, vertices = levels(net_test_dat$sp2_name))
     
     
-    net_test_pos <- net_test_dat %>% filter(type == "Positive")
-    net_test_pos <- graph_from_data_frame(net_test_pos[,10:11], directed = F)
+    net_test_pos <- net_test_dat %>% filter(type == "Positive") %>% 
+      mutate(weight = abs(scale(obs_cooccur) - scale(exp_cooccur)))
+    net_test_pos <- graph_from_data_frame(net_test_pos[,c(10:11,13)], directed = F, vertices = levels(net_test_dat$sp2_name))
     
     res <- list(net_test_dat, net_test_pos, net_test_neg)
     names(res) <- c("Data", "Positive", "Negative")
@@ -385,82 +394,315 @@ for(l in 1:length(assoc.Sp)){
       net_stat <- rbind.data.frame(net_stat,
                                    cbind.data.frame(Data = names(assoc.Sp)[l],
                                                     Year = names(dat2)[i],
-                                                    association = k,
+                                                    Association = k,
                                                     sum = sum(degree(g1)), # sum links
                                                     Link_density = mean(degree(g1)), # links per species
-                                                    Connectance = sum(degree(g1)) / (length(E(g1))^2), # connectance
-                                                    Modularity = modularity(cluster_walktrap(g1)) # modularity
+                                                    Connectance = sum(degree(g1)) / (length(V(g1))^2), # connectance
+                                                    Modularity = modularity(cluster_fast_greedy(g1)) # modularity
                                    )
       )
     }
   }
 }
 
-net_stat %>% gather(-1,-2,-3, -4, key = "type", value = "value") %>% 
-  filter(type == "Connectance") %>% ungroup() %>% 
-  mutate(Year = as.numeric(as.character(Year))) %>% filter(Year < 2017) %>%
-  ggplot(aes(y = value, x = Year, color = Data, fill = Data)) + 
-  geom_point() + 
-  geom_line() + 
-  geom_smooth(alpha = .3) +
-  facet_grid(Data~association, scales = "free_y") + 
-  theme_bw() + scale_color_viridis(discrete=TRUE) + scale_fill_viridis(discrete=TRUE) +
-  ggtitle("Connectance")
-
-net_stat %>% gather(-1,-2,-3, -4, key = "type", value = "value") %>% 
-  filter(type == "Modularity") %>% ungroup() %>% 
-  mutate(Year = as.numeric(as.character(Year))) %>% filter(Year < 2017) %>%
-  ggplot(aes(y = value, x = Year, color = Data, fill = Data)) + 
-  geom_point() + 
-  geom_line() + 
-  geom_smooth(alpha = .3) +
-  facet_grid(Data~association, scales = "free_y") + 
-  theme_bw() + scale_color_viridis(discrete=TRUE) + scale_fill_viridis(discrete=TRUE) +
-  ggtitle("Modularity")
-
-net_stat %>% gather(-1,-2,-3, -4, key = "type", value = "value") %>% 
-  filter(type == "Link_density") %>% ungroup() %>% 
-  mutate(Year = as.numeric(as.character(Year))) %>% filter(Year < 2017) %>%
-  ggplot(aes(y = value, x = Year, color = Data, fill = Data)) + 
-  geom_point() + 
-  geom_line() + 
-  geom_smooth(alpha = .3) +
-  facet_grid(Data~association, scales = "free_y") + 
-  theme_bw() + scale_color_viridis(discrete=TRUE) + scale_fill_viridis(discrete=TRUE) +
-  ggtitle("Link density")
-
-
 distri_deg <- c()
-for(l in 1:length(dat_used)){
-  dat2 <- dat_used[[l]] 
+for(l in 1:length(assoc.Sp)){
+  dat2 <- assoc.Sp[[l]] 
   for(i in 1:length(dat2)){
-    for(j in 1:length(dat2[[i]])){
-      for(k in c("network_pos", "network_neg")){
-        
-        g1 <- dat2[[i]][[j]][[k]]
-        
-        distri_deg <- rbind.data.frame(distri_deg,
-                                       cbind.data.frame(Data = names(dat_used)[l],
-                                                        Year = names(dat2)[i],
-                                                        association = ifelse(k == "network_pos", "Positive", "Negative"),
-                                                        degree_distribution = Mode(degree_distribution(g1))
-                                       )
+    for(k in c("Positive", "Negative")){
+      
+      g1 <- dat2[[i]][[k]]
+      
+      distri_deg <- rbind.data.frame(distri_deg,
+                                     cbind.data.frame(Data = names(assoc.Sp)[l],
+                                                      Year = names(dat2)[i],
+                                                      Association = k,
+                                                      degree_distribution = median(degree_distribution(g1))
+                                     )
+      )
+    }
+  }
+}
+
+net_stat <- net_stat %>% mutate(Modularity = ifelse(Modularity < 0, 0 , Modularity))
+
+net_stat %>% gather(-1,-2,-3,-4, key = "type", value = "value") %>% 
+  ungroup() %>% mutate(Year = as.numeric(as.character(Year))) %>% 
+  filter(type %in% c("Connectance", "Modularity"), !(Data == "FIN" & Association == "Negative")) %>% 
+  ggplot(aes(y = value, x = Year, color = Data, fill = Data)) + 
+  geom_point() + 
+  geom_path() +
+  facet_grid(type~Association, scale = "free_y") + 
+  scale_color_viridis(discrete=TRUE) + scale_fill_viridis(discrete=TRUE)
+
+net_stat %>% gather(-1,-2,-3,-4, key = "type", value = "value") %>% mutate(Year = as.numeric(as.character(Year))) %>%
+  filter(type %in% c("Connectance", "Modularity"), !(Data == "FIN" & Association == "Negative")) %>% 
+  group_by(Data, Association, type) %>% do(trend = lm(value ~ Year, data = .)) %>% 
+  broom::tidy(trend) %>%
+  filter(term == "Year")
+
+##############################
+##     species richness     ##
+##############################
+
+data_counts_filtered %>% group_by(Data, Year) %>% summarise(n = length(unique(Species))) %>%
+  mutate(Year = as.numeric(as.character(Year))) %>%
+  ggplot(aes(y = n, x = Year)) + 
+  geom_point() + 
+  geom_smooth() +
+  facet_grid(Data~., scale = "free_y") + 
+  theme_classic()
+
+data_counts_filtered %>% group_by(Data, Year) %>% summarise(n = length(unique(Species))) %>%
+  group_by(Data) %>% 
+  do(trend = lm(n ~ Year, data = .)) %>% broom::tidy(trend)
+
+data_counts_filtered %>% group_by(Data, Year) %>% summarise(n = length(unique(Site)))%>%
+  group_by(Data) %>% 
+  do(trend = lm(n ~ Year, data = .)) %>% broom::tidy(trend)
+
+############################
+##     beta diversity     ##
+############################
+
+library(betapart)
+
+beta_div <- c()
+for(n in unique(data_counts_filtered$Data)){
+  data_counts_temp <- data_counts_filtered[data_counts_filtered$Data == n,]
+  
+  for(m in c(min(data_counts_temp$Year) : max(data_counts_temp$Year))){
+    
+    obs_comm <- data_counts_temp %>% ungroup() %>% filter(Year == m) %>% 
+      mutate(n = ifelse(n > 0, 1, 0)) %>%
+      spread(Species, n, fill = 0) %>% as.data.frame %>% 
+      mutate(id = paste0(Site,"_",Year)) %>% dplyr::select(-Site,-Year,-Data) %>% column_to_rownames("id")
+    
+    beta_div <- rbind.data.frame(beta_div, 
+                                 cbind.data.frame(Data = n, Year = m, t(unlist(beta.multi(obs_comm)))
+                                 )
+    )
+    
+  }
+}
+
+beta_div %>% 
+  ggplot(aes(x = Year, y = beta.SOR)) + 
+  geom_point() + 
+  geom_smooth() +
+  facet_wrap(~Data, scale = "free") +
+  theme_classic()
+
+beta_div %>% group_by(Data) %>% do(trend = lm(beta.SOR ~ Year, data = .)) %>% broom::tidy(trend)
+
+
+beta_div %>% left_join(net_stat %>% mutate(Year = as.numeric(as.character(Year)))) %>%
+  ggplot(aes(x = beta.SOR, y = Connectance, color = Association)) + 
+  geom_point() + 
+  geom_smooth(method = "lm") +
+  facet_grid(~Data) +
+  theme_classic()
+
+
+beta_div %>% left_join(net_stat %>% mutate(Year = as.numeric(as.character(Year)))) %>%
+  group_by(Data, Association) %>% do(cor = lm(Connectance ~ beta.SOR, data = .)) %>% broom::tidy(cor)
+
+
+data_counts_filtered %>% group_by(Data, Year) %>% summarise(n = length(unique(Site))) %>%
+  ggplot(aes(x = Year, y = n)) + 
+  geom_point() + 
+  geom_smooth() +
+  facet_grid(~Data) +
+  theme_classic()
+
+data_counts_filtered %>% group_by(Data, Year) %>% summarise(n = length(unique(Site))) %>%
+  left_join(net_stat %>% mutate(Year = as.numeric(as.character(Year)))) %>%
+  ggplot(aes(x = n, y = Connectance, color = Association)) + 
+  geom_point() + 
+  geom_smooth(method = "lm") +
+  facet_grid(~Data) +
+  theme_classic()
+
+
+#############################
+##   results per species   ##
+#############################
+
+sp_stat <- c()
+for(l in 1:length(assoc.Sp)){
+  dat2 <- assoc.Sp[[l]] 
+  for(i in 1:length(dat2)){
+    for(k in c("Positive", "Negative")){
+      
+      g1 <- dat2[[i]][[k]]
+      
+      n.sp.poss <- as.data.frame(
+        table(dat2[[i]][["Data"]]$sp1_name)+
+          table(dat2[[i]][["Data"]]$sp2_name)
+      ) %>% rename(Species = Var1)
+      
+      
+      sp.as <- unlist(strsplit(attr(E(g1), "vnames"), "\\|"))
+      sp.all <- attr(V(g1), "names")
+      
+      if(length(sp.as) > 0){
+        sp_stat <- rbind.data.frame(
+          sp_stat,
+          cbind.data.frame(Data = names(assoc.Sp)[l],
+                           Year = names(dat2)[i],
+                           Association = k,
+                           rbind.data.frame(as.data.frame(table(sp.as)) %>% 
+                                              rename(Species = sp.as, N = Freq),
+                                            cbind.data.frame(Species = setdiff(sp.all, sp.as), N = 0)),
+                           n.sp = length(sp.all)
+          ) %>% left_join(n.sp.poss)
+        )
+      } else {
+        sp_stat <- rbind.data.frame(
+          sp_stat,
+          cbind.data.frame(Data = names(assoc.Sp)[l],
+                           Year = names(dat2)[i],
+                           Association = k,
+                           cbind.data.frame(Species = sp.all, N = 0),
+                           n.sp = length(sp.all)
+          ) %>% left_join(n.sp.poss)
         )
       }
     }
   }
 }
 
-Mode <- function(x) {
-  ux <- unique(x)
-  ux[which.max(tabulate(match(x, ux)))]
+
+sp_btw <- c()
+for(l in 1:length(assoc.Sp)){
+  dat2 <- assoc.Sp[[l]] 
+  for(i in 1:length(dat2)){
+    for(k in c("Positive", "Negative")){
+      
+      g1 <- dat2[[i]][[k]]
+      
+      sp.as <- unique(unlist(strsplit(attr(E(g1), "vnames"), "\\|")))
+      sp.all <- attr(V(g1), "names")
+      
+      sp_btw <- rbind.data.frame(
+        sp_btw,
+        cbind.data.frame(Data = names(assoc.Sp)[l],
+                         Year = names(dat2)[i],
+                         Association = k,
+                         betweenness(g1) %>% as.data.frame %>% rownames_to_column("Species") %>% rename(bet = ".")
+        )
+      )
+    }
+  }
 }
 
-distri_deg  %>% group_by(Data, Year, association) %>% 
-  summarise(degree_distribution = median(degree_distribution)) %>%
-  filter(association == "Positive", Data != "FIN") %>%
-  ggplot(aes(y = degree_distribution, x = Year, color = Data)) + geom_point() + geom_path() +
-  theme_bw()
+sp_stat <- sp_stat %>% group_by(Data, Species, Association) %>% mutate(n.nonr = length(N[N > 0])) %>% filter()
+
+sp_stat2 <- sp_stat %>% 
+  dplyr::select(-Freq) %>% spread(key = Association, value = N) %>%
+  mutate(Total = Positive + Negative, Year = as.numeric(as.character(Year))) %>% 
+  gather(-1,-2,-3,-4, key = Association, value = N)
+
+sp_stat_trends_tot <- c()
+for(i in unique(sp_stat2$Data)){
+  for(j in unique(sp_stat2$Association)){
+    sp_stat_trends_temp <- sp_stat2 %>% filter(Data == i, Association == j)
+    for(k in unique(sp_stat_trends_temp$Species)){
+      m <- NULL
+      tryCatch(
+        m <- glm(cbind(N, (n.sp-1)) ~ Year, family = binomial, data = sp_stat_trends_temp %>% filter(Species == k)),
+        warning = function(w) {
+          print("warning")
+        })
+      if(!is.null(m)){
+        if(dim(summary(m)$coefficient)[1]>1){
+            sp_stat_trends_tot <- rbind.data.frame(sp_stat_trends_tot,
+                                                   cbind.data.frame(
+                                                     Data = i,
+                                                     Association = j,
+                                                     Species = k,
+                                                     trend.assoc = summary(m)$coefficient[2,1],
+                                                     se.assoc = summary(m)$coefficient[2,2]
+                                                   )
+            )
+        }
+      }
+    }
+  }
+}
+
+
+sp_btw_trends_tot <- sp_btw %>% group_by(Data, Species, Association) %>% 
+  mutate(Year = as.numeric(as.character(Year))) %>% 
+  do(trend = lm(bet ~ Year, data = .)) %>%
+  broom::tidy(trend) %>% filter(term == "Year") %>% dplyr::select(-term)
+
+# occupancy trends
+trends_per_species <- data_counts %>% group_by(Data, Year) %>% summarise(n.sites = length(unique(Site))) %>% 
+  right_join(data_counts) %>% group_by(Species, Year, Data) %>% 
+  summarise(occ.sites = n(), tot.sites = unique(n.sites)) %>% 
+  group_by(Species, Data) %>% do(trend = glm(cbind(occ.sites,tot.sites) ~ Year, family = binomial, data = .)) %>%
+  broom::tidy(trend) %>% filter(term == "Year") %>% dplyr::select(1,2,4,5) %>% rename(trend.occ = estimate,
+                                                                                      se.occ = std.error) %>%
+  group_by(Data) %>% mutate(se.occ = scale(se.occ))
+
+
+# trend assoc ~ occupancy trend
+# total
+sp_stat_trends_tot %>% 
+  left_join(trends_per_species) %>% filter(!(Data == "FIN" & Association == "Negative")) %>%
+  ggplot(aes(x = trend.occ, y = trend.assoc)) + 
+  geom_point(pch = 1) + 
+  geom_smooth(method = "lm", aes(weight = 1/se.assoc)) + 
+  geom_hline(yintercept = 0, linetype = 2, color = "grey") + 
+  geom_vline(xintercept = 0, linetype = 2, color = "grey") + 
+  facet_grid(Data~Association, scale = "free") + 
+  theme_classic() +
+  scale_y_continuous("Trend in associations") + 
+  scale_x_continuous("Occupancy trend")
+
+sp_stat_trends_tot %>% left_join(trends_per_species) %>% 
+  filter(!(Data == "FIN" & Association == "Negative")) %>% 
+  group_by(Data, Association) %>%
+  do(fit = lm(trend.assoc ~ trend.occ, weight = 1/se.assoc, data = .)) %>% 
+  broom::tidy(fit) %>% filter(term == "trend.occ")
+
+
+trends_per_species %>% group_by(Data) %>% mutate(tot = length(unique(Species))) %>% 
+  group_by(Data, trend = ifelse(trend < 0, "negative", "positive")) %>% 
+  summarise(n = n(), prop = n / unique(tot)) 
+
+sp_stat_trends_tot %>% 
+  left_join(trends_per_species) %>% filter(std.error < 1) %>% 
+  group_by(Data) %>% 
+  ggplot(aes(x = Data, y = abs(estimate), fill = Association)) + geom_boxplot()
+
+
+par(mfrow = c(3,3))
+for(i in unique(sp_stat_trends_tot$Data)){
+  for(j in unique(sp_stat_trends_tot$Association)){
+    dat <- sp_stat_trends_tot %>% 
+      left_join(trends_per_species) %>% 
+      filter(Data == i, Association == j)
+    m <- lm(trend.assoc ~ trend.occ, weights = 1/se.assoc, data = dat)
+    # hist(dat$estimate)
+    plot(m, 2, main = paste(i , j))
+  }
+}
+
+# ratio
+sp_stat_trends_rat %>%
+  left_join(trends_per_species) %>% 
+  ggplot(aes(x = trend, y = estimate)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", aes(weight = 1/(std.error+0.0001))) + 
+  facet_grid(Data~., scale = "free")
+
+sp_stat_trends_rat %>% left_join(trends_per_species) %>% 
+  group_by(Data) %>%
+  do(fit = lm(estimate ~ trend, weights = 1/(std.error+0.0001), data = .)) %>% broom::tidy(fit) %>% filter(term == "trend")
+
+
 
 
 #######################
@@ -472,10 +714,16 @@ gdata::keep(sites,
             dist_sites,
             data_counts,
             data_counts_filtered,
+            beta_div,
+            sel_sites,
             suitability,
             suitability_clipped,
             dist_max,
             dist_max_sum,
             assoc.Sp,
-            net_stat, distri_deg,
+            net_stat, 
+            distri_deg,
+            sp_stat,
+            sp_stat_trends_tot,
+            trends_per_species,
             sure=T)

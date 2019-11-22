@@ -90,6 +90,49 @@ for(i in 1:dim(ext_temp_summer)[2]){
 }
 rownames(temp_summer_2) <- NULL
 
+trends.sites <- temp_summer_2 %>% group_by(country, Site) %>% do(fit = lm(temp ~ Year, data = .)) %>% broom::tidy(fit) %>%
+  filter(term == "Year")
+
+trends.sites %>% group_by(country) %>% summarise(mean = mean(estimate), min = min(estimate), max = max(estimate))
+
+library(cowplot)
+
+p1 <- temp_summer_2 %>% group_by(country) %>% mutate(year.class = cut_interval(Year, 4, labels = F)) %>%
+  filter(year.class %in% c(1,4)) %>% group_by(country, Site, year.class) %>% summarise(temp = mean(temp)) %>%
+  ggplot(aes(x = temp, fill = as.factor(year.class))) + 
+  geom_histogram(alpha = .7, position = "identity") + 
+  facet_grid(country ~., scales = "free", 
+             labeller = labeller(country = setNames(c("Finland", "Netherlands"),c("FIN", "NL")))) + 
+  theme_classic() +
+  scale_y_continuous("") + 
+  scale_x_continuous("Temperature (°C)") +
+  scale_fill_manual("Period", labels = c("First quarter", "Last quarter"), values = c("#6495ED", "#CD2626")) +
+  theme(legend.position = c(0.2,.3),
+        strip.background = element_rect(colour=NA, fill=NA), 
+        strip.placement = "outside",
+        axis.text = element_text(color = "black"),
+        strip.text.y = element_blank())
+
+
+p2 <- trends.sites %>% 
+  ggplot(aes(x = estimate)) + 
+  geom_histogram(bins = 15, fill = "grey") +
+  facet_grid(country ~ ., scales = "free", 
+             labeller = labeller(country = setNames(c("Finland", "Netherlands"),c("FIN", "NL")))) + 
+  theme_classic() + 
+  scale_y_continuous("") + 
+  scale_x_continuous("Temperature change (°C / year)") +
+  theme(strip.background = element_rect(colour=NA, fill=NA), 
+        strip.placement = "outside",
+        axis.text = element_text(color = "black"),
+        strip.text.y = element_text(size = 12, face = "bold"))
+
+
+plot_grid(p1, p2, ncol = 2, labels = c("A", "B"), align = "v")
+
+ggsave(file = "../Figure_temp_trends.pdf")
+
+
 library(lmerTest)
 m.NL <- lmer(temp ~ Year + X*Y + (1|Site), data = temp_summer_2 %>% filter(country == "NL"))
 summary(m.NL)$coefficients[2,1:2]

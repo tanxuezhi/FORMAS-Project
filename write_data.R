@@ -252,8 +252,8 @@ countsSWE <- countsSWE %>%
 
 
 #butterflies - finland
-countsFIN1 <- fread("../Data/Butterflies - Finland/FINLAND_Records_1999-2015.txt", sep = ";", h=T)
-countsFIN2 <- fread("../Data/Butterflies - Finland/FINLAND_Records_2016.txt", sep = ";", h=T)[,-6]
+countsFIN1 <- fread("../Data/Butterflies - Finland/FINLAND_Records_1999-2015.txt", sep = ";")
+countsFIN2 <- fread("../Data/Butterflies - Finland/FINLAND_Records_2016.txt", sep = ";")[,-6]
 countsFIN <- rbind(countsFIN1, countsFIN2)
 colnames(countsFIN) <- gsub ("Species_Faunaeur", "Species", colnames(countsFIN))
 colnames(countsFIN) <- gsub ("Individuals", "n", colnames(countsFIN))
@@ -272,7 +272,7 @@ countsFIN <- countsFIN %>%
   mutate(n = ifelse(is.na(n), 0, 1))
 
 table((countsFIN %>% 
-         group_by(Site, Species) %>% summarise(n = length(unique(Year))))$n)
+         group_by(Site) %>% summarise(n = n_distinct(Year)))$n)
 
 
 #butterflies - netherlands

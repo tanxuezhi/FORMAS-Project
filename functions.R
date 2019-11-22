@@ -142,7 +142,7 @@ sp_site_occupancy_trend <- function(data){
   for(i in 1:length(unique(data$Site))){
     # cat(paste("\r", unique(data$Site)[i]))
     cat(paste("\r",round(i / length(unique(data$Site)), 2)*100,"%"))
-    data.temp <- data %>% dplyr:::filter(Site == unique(data$Site)[i])
+    data.temp <- subset(data, data$Site == unique(data$Site)[i])
     for(j in 1:length(unique(data.temp$Species))){
       cat(".")
       if(any((data.temp %>% dplyr:::filter(Species == unique(data.temp$Species)[j]))$n != 1)){
@@ -193,6 +193,7 @@ sp_site_occupancy_trend.predict <- function(data){
   }
   return(res)
 }
+
 
 sp_clim_sens <- function(data){
   res <- c()
