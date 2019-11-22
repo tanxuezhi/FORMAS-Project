@@ -2,11 +2,21 @@ library(unmarked)
 library(tidyverse)
 library(data.table)
 
-# habitat data
+### habitat data
 frag_data <- read_csv("../Connectivity - Fragmentation/Fragmentation/Frag_indices_Allhab.csv")
 sites_FIN <- read_csv(file = "../Data/Butterflies - Finland/Sites_FIN_ETRS89_landcover.csv")
 
-# butterfly data
+### butterfly data
+traits.butterflies <- as.tbl(read_csv("../Data/Traits/SpeciesTraits_WDV2014.csv"))
+traits.butterflies[grep("Colias croceus", traits.butterflies$Scientific_name), "Scientific_name"] <- "Colias crocea"
+traits.butterflies[grep("walbum", traits.butterflies$Scientific_name), "Scientific_name"] <- "Satyrium w-album"
+traits.butterflies[grep("Neozephyrus quercus", traits.butterflies$Scientific_name), "Scientific_name"] <- "Favonius quercus"
+traits.butterflies[grep("lycaon", traits.butterflies$Scientific_name), "Scientific_name"] <- "Hyponephele lycaon"
+traits.butterflies[grep("Polygonia", traits.butterflies$Scientific_name), "Scientific_name"] <- "Nymphalis c-album"
+traits.butterflies[grep("Inachis io", traits.butterflies$Scientific_name), "Scientific_name"] <- "Aglais io"
+traits.butterflies[grep("tithonus", traits.butterflies$Scientific_name), "Scientific_name"] <- "Pyronia tithonus"
+traits.butterflies[grep("alcon", traits.butterflies$Scientific_name), "Scientific_name"] <- "Phengaris alcon"
+
 butterfly_habitat <- read_csv("../Data/Butterfly_biotopes.csv")
 butterfly_habitat[grep("Neozephyrus quercus", butterfly_habitat$Species), "Species"] <- "Favonius quercus"
 
@@ -22,113 +32,78 @@ countsFIN$Species <- gsub("Cyaniris semiargus", "Polyommatus semiargus", countsF
 countsFIN$Species <- gsub("Leptidea juvernica", "Leptidea sinapis", countsFIN$Species)
 
 countsFIN <- countsFIN %>%
-  group_by(Site, Species, Year, Date) %>%
+  group_by(Site, Species, Year) %>%
   summarise(n = sum(n)) %>%
   ungroup() %>%
-  complete(nesting(Site, Year, Date), Species) %>%
+  complete(nesting(Site, Year), Species) %>%
   ungroup() %>%
   mutate(
     n = ifelse(is.na(n), 0, 1),
-    Year = year(as.Date(Date, format = "%d.%m.%Y")),
-    Date = yday(as.Date(Date, format = "%d.%m.%Y"))
   ) %>%
   ungroup() %>%
   mutate(Site = paste0(Site, "_FIN"))
 
-countsFIN.fil <- countsFIN %>%
+# NL
+countsNL1 <- readRDS("../Data/Butterflies - Netherlands/AllSpecies_reg_gam_ind_20171206_algroutes.rds") %>%
+  as.tbl() %>%
+  dplyr::select(1, 2, 3, 4) %>%
+  rename(n = regional_gam)
+countsNL2 <- rio::import("../Data/Butterflies - Netherlands/MissingSpecies.xlsx") %>%
+  as.tbl() %>%
+  dplyr::select(1, 3, 4, 5) %>%
+  rename(n = Ntot, SITE = Site) %>%
+  mutate(n = ifelse(n == -1, 0, n))
+countsNL <- bind_rows(countsNL1, countsNL2)
+
+countsNL <- countsNL %>%
+  complete(nesting(SITE, YEAR), SPECIES) %>%
+  mutate(n = ifelse(is.na(n) | n == 0, 0, 1)) %>%
+  rename(Year = YEAR, Site = SITE, Species = SPECIES) %>%
+  dplyr::select(Year, Site, Species, n)
+
+countsNL <- left_join(
+  countsNL,
+  traits.butterflies %>% mutate(Species = casefold(Species))
+) %>%
+  dplyr::mutate(Species = Scientific_name, Site = paste0(Site, "_NL")) %>%
+  select(2, 1, 3, 4)
+
+# merge
+pres_abs <- bind_rows(NL = countsNL, FIN = countsFIN, .id = "Country")
+
+### select sites with at least 9 years
+counts.fil <- pres_abs %>%
   group_by(Site) %>%
   summarise(n = n_distinct(Year)) %>%
   filter(n > 8)
-countsFIN <- countsFIN %>% filter(Site %in% countsFIN.fil$Site)
+pres_abs <- pres_abs %>% filter(Site %in% counts.fil$Site)
 
 res <- c()
-for(j in unique(countsFIN$Species)){
-  for (i in unique(countsFIN$Site)) {
-    dat <- countsFIN %>%
-      filter(Site == i, Species == j)
-    dat$period <- cut_interval(dat$Year, 3, labels = F)
-    dat <- dat %>%
-      group_by(period) %>%
-      summarise(n = max(n))
-    
-    if(dat[1,2] == 0 & dat[3,2] == 1){
-      event = "gain"
+for (k in unique(pres_abs$Country)) {
+  dat.country <- pres_abs %>% filter(Country == k)
+  for (j in unique(dat.country$Species)) {
+    for (i in unique(dat.country$Site)) {
+      dat <- dat.country %>%
+        filter(Site == i, Species == j)
+      dat$period <- cut_interval(dat$Year, 3, labels = F)
+      dat <- dat %>%
+        group_by(period) %>%
+        summarise(n = max(n))
+
+      if (dat[1, 2] == 0 & dat[3, 2] == 1) {
+        event <- "gain"
+      }
+      if (dat[1, 2] == 0 & dat[3, 2] == 0) {
+        event <- "absence"
+      }
+      if (dat[1, 2] == 1 & dat[3, 2] == 1) {
+        event <- "persistence"
+      }
+      if (dat[1, 2] == 1 & dat[3, 2] == 0) {
+        event <- "loss"
+      }
+
+      res <- rbind.data.frame(res, cbind.data.frame(Country = k, Species = j, Site = i, event))
     }
-    if(dat[1,2] == 0 & dat[3,2] == 0){
-      event = "absence"
-    }
-    if(dat[1,2] == 1 & dat[3,2] == 1){
-      event = "persistence"
-    }
-    if(dat[1,2] == 1 & dat[3,2] == 0){
-      event = "loss"
-    }
-    
-    res <- rbind.data.frame(res, cbind.data.frame(Species = j, Site = i, event))
   }
-}
-
-
-
-res <- c()
-for (i in unique(countsFIN$Species)) {
-  dat <- countsFIN %>%
-    filter(Species == i) %>%
-    select(-Species) %>%
-    ungroup() %>%
-    left_join(sites_FIN %>% mutate(Site = paste0(Site, "_FIN"))) %>%
-    left_join(frag_data) %>%
-    mutate(yr = as.factor(Year), landcover = as.factor(Landcover)) %>%
-    filter(Scale == 10000, Habitat == "Generalist")
-  
-  dat.f <- formatMult(dat[, c(2, 1, 3, 4, 2)])
-  siteCovs(dat.f) <- dat %>%
-    select(1, 5, 6, 7, 10, 11) %>%
-    group_by(Site) %>%
-    summarise_all(unique) %>%
-    mutate(Landcover = as.factor(Landcover))
-  yearlySiteCovs(dat.f) <- list(yr = as.factor(dat$Year))
-  # summary(dat.f)
-  
-  dat <- dat %>% filter(Year == 2010)
-  dat.o <- unmarkedFrameOccu(dat %>% select(1, 3, 4) %>% spread("Date", "n") %>% select(-1),
-                             siteCovs = dat %>% select(1, 5, 6, 7, 10, 11) %>% group_by(Site) %>% summarise_all(unique) %>%
-                               mutate(Landcover = as.factor(Landcover)),
-                             obsCovs = list(Date = matrix(rep(unique(dat$Date), length(unique(dat$Site))),
-                                                          nrow = length(unique(dat$Site)), byrow = F
-                             ))
-  )
-  summary(dat.o)
-  
-  fm.o <- occu(~ Date + I(Date^2) ~ X + Y + Landcover + PLAND, data = dat.o, se = F)
-  
-  fm <- colext(
-    psiformula = ~ PLAND + X + Y,
-    gammaformula = ~PLAND,
-    epsilonformula = ~PLAND,
-    pformula = ~ as.factor(Year) + Date + I(Date^2),
-    data = dat.f,
-    se = F,
-    method = "Nelder-Mead", control = list(maxit = 1e9)
-  )
-  
-  
-  pred <- cbind.data.frame(
-    Site = unique(dat$Site),
-    Species = i,
-    init = predict(fm,
-                   type = "psi",
-                   newdata = data.frame(Site = unique(dat$Site))
-    )[, 1],
-    Col.prob = predict(fm,
-                       type = "col",
-                       newdata = data.frame(Site = unique(dat$Site))
-    )[, 1],
-    Ext.prob = predict(fm,
-                       type = "ext",
-                       newdata = data.frame(Site = unique(dat$Site))
-    )[, 1]
-  )
-  
-  res <- rbind.data.frame(res, pred)
 }
