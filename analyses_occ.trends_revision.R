@@ -1,4 +1,3 @@
-library(unmarked)
 library(tidyverse)
 library(data.table)
 library(lmerTest)
@@ -97,7 +96,7 @@ for (k in unique(pres_abs$Country)) {
       dat <- dat %>%
         group_by(period) %>%
         summarise(n = max(n))
-
+      
       if (dat[1, 2] == 0 & dat[3, 2] == 1) {
         event <- "gain"
       }
@@ -110,15 +109,16 @@ for (k in unique(pres_abs$Country)) {
       if (dat[1, 2] == 1 & dat[3, 2] == 0) {
         event <- "loss"
       }
-
+      
       res <- rbind.data.frame(res, cbind.data.frame(Country = k, Species = j, Site = i, event))
     }
   }
 }
 
-table(res$event)
+table(res[, c("Country", "event")])
 
 write_csv(res, "../Long-term-event.csv")
+res <- read_csv("../Long-term-event.csv")
 
 #######
 # analyses
@@ -175,59 +175,74 @@ data <- left_join(data, butterflies.cti.presence %>% group_by(Site) %>% summaris
 data <- data %>% mutate(STI_rel = cti - STI)
 
 ## big loop
-res.mods <- foreach(k = unique(butterflies$Scale), .combine = rbind.data.frame) %dopar% {
+library(DHARMa)
 
+
+res.mods <- foreach(k = unique(data$Scale), .combine = rbind.data.frame) %dopar% {
+  
   # colonisation
   dat.Col <- data %>%
     mutate(Colonisation = ifelse(event == "gain", 1, ifelse(event == "absence", 0, NA))) %>%
-    filter(!is.na(Colonisation)) %>%
+    filter(!is.na(Colonisation), Scale == k) %>%
     mutate_at(.vars = c(7, 8, 9, 10, 13:18, 20), .funs = function(x) stdize(x, prefix = F))
-
-
+  
+  
   m.col <- glmer(Colonisation ~ STI_rel * PC3 +
-    STI_rel * PC4 +
-    STI_rel * PC1 +
-    PC1 * PLAND * CLUMPY +
-    STI_rel * PLAND * CLUMPY +
-    Habitat + X * Y +
-    (1 | gridCell50 / Site) + (1 | Species),
-  family = binomial,
-  data = subset(dat.Col, dat.Col$Scale == 20000),
-  nAGQ = 0, control = glmerControl(
-    optimizer = "nloptwrap",
-    optCtrl = list(maxfun = 1e10),
-    calc.derivs = FALSE
-  ), verbose = F
+                   STI_rel * PC4 +
+                   STI_rel * PC1 +
+                   PC1 * PLAND * CLUMPY +
+                   STI_rel * PLAND * CLUMPY +
+                   Habitat + X * Y +
+                   (1 | gridCell50 / Site) + (1 | Species),
+                 family = binomial,
+                 data = dat.Col,
+                 nAGQ = 0, control = glmerControl(
+                   optimizer = "nloptwrap",
+                   optCtrl = list(maxfun = 1e10),
+                   calc.derivs = FALSE
+                 ), verbose = F
   )
-
+  
+  # optional : draw qqplots of residuals
+  # simulationOutput_col <- simulateResiduals(fittedModel = m.col, n = 500, use.u = T)
+  # png(file = paste0("../qqplot_col_scale_", k, ".png"), width = 4.5, height = 4, units = "in", res = 300)
+  # plotQQunif(simulationOutput_col, testUniformity = T, testOutliers = T)
+  # dev.off()
+  
   # summary(m.col)
-
-
+  
+  
   # extinction
   dat.Ext <- data %>%
-    mutate(Extinction = ifelse(event == "loss", 1, ifelse(event == "persistence", 0, NA))) %>%
-    filter(!is.na(Extinction)) %>%
+    mutate(Extinction = ifelse(event == "loss", 1, ifelse(event == "persistence", 0, NA)), CLUMPY = log(CLUMPY + 1.0001)) %>%
+    filter(!is.na(Extinction), Scale == k) %>%
     mutate_at(.vars = c(7, 8, 9, 10, 13:18, 20), .funs = function(x) stdize(x, prefix = F))
-
-
+  
+  
   m.ext <- glmer(Extinction ~ STI_rel * PC3 +
-    STI_rel * PC4 +
-    STI_rel * PC1 +
-    PC1 * PLAND * CLUMPY +
-    STI_rel * PLAND * CLUMPY +
-    Habitat + X * Y +
-    (1 | gridCell50 / Site) + (1 | Species),
-  family = binomial,
-  data = subset(dat.Ext, dat.Ext$Scale == 20000),
-  nAGQ = 0, control = glmerControl(
-    optimizer = "nloptwrap",
-    optCtrl = list(maxfun = 1e10),
-    calc.derivs = FALSE
-  ), verbose = F
+                   STI_rel * PC4 +
+                   STI_rel * PC1 +
+                   PC1 * PLAND * CLUMPY +
+                   STI_rel * PLAND * CLUMPY +
+                   Habitat + X * Y +
+                   (1 | gridCell50 / Site) + (1 | Species),
+                 family = binomial,
+                 data = dat.Ext,
+                 nAGQ = 0, control = glmerControl(
+                   optimizer = "nloptwrap",
+                   optCtrl = list(maxfun = 1e10),
+                   calc.derivs = FALSE
+                 ), verbose = F
   )
-
+  
+  # optional : draw qqplots of residuals
+  # simulationOutput_ext <- simulateResiduals(fittedModel = m.ext, n = 500, use.u = T)
+  # png(file = paste0("../qqplot_ext_scale_", k, ".png"), width = 4.5, height = 4, units = "in", res = 300)
+  # plotQQunif(simulationOutput_ext, testUniformity = T, testOutliers = T)
+  # dev.off()
+  
   # summary(m.ext)
-
+  
   rbind.data.frame(
     cbind.data.frame(
       Scale = k,
@@ -244,4 +259,163 @@ res.mods <- foreach(k = unique(butterflies$Scale), .combine = rbind.data.frame) 
   )
 }
 
-write_csv(res.mods, "../rev_res_mods_221119.csv")
+write_csv(res.mods, "../rev_res_mods_251119.csv")
+
+
+###################
+##     PLOTS     ##
+###################
+
+##### Coefficients #####
+
+res <- read_csv("../rev_res_mods_251119.csv")
+names(res)[5:6] <- c("lwr", "upr")
+res$Scale <- as.factor(res$Scale)
+levels(res$Scale) <- paste(c(1, 3, 5, 10, 20, 30, 50), "km")
+
+res$Variables <- gsub("poly_rescale\\(poly\\(PC1, 2\\), 2\\)2", "PC1^2", res$Variables)
+res$Variables <- gsub("poly_rescale\\(poly\\(PC1, 2\\), 2\\)1", "PC1", res$Variables)
+res$Variables <- gsub("STI_rel", "STI", res$Variables)
+res$Variables <- gsub("PC1", "Spatial use", res$Variables)
+res$Variables <- gsub("PC3", "Generation time", res$Variables)
+res$Variables <- gsub("PC4", "Resource specialisation", res$Variables)
+res$Variables <- gsub("PLAND", "Proportion of SNH", res$Variables)
+res$Variables <- gsub("CLUMPY", "Aggregation of SNH", res$Variables)
+res$Variables <- gsub(":", " × ", res$Variables)
+res$Variables <- gsub("Proportion of SNH × Aggregation of SNH", "Proportion × Aggregation of SNH", res$Variables)
+res$Variables <- gsub("X", "Longitude", res$Variables)
+res$Variables <- gsub("Y", "Latitude", res$Variables)
+
+res$Variables <- gsub("STI × Proportion × Aggregation of SNH", "STI × Proportion ×\nAggregation of SNH", res$Variables)
+res$Variables <- gsub("Spatial use × Proportion × Aggregation of SNH", "Spatial use × Proportion ×\nAggregation of SNH", res$Variables)
+
+
+res <- res %>% mutate(Significancy = ifelse(lwr < 0 & upr < 0 | lwr > 0 & upr > 0, "Significant", "Not significant"))
+
+res$Scale <- factor(res$Scale, levels = rev(paste(c(1, 3, 5, 10, 20, 30, 50), "km")))
+
+res$Variables <- factor(res$Variables, levels = c(
+  "(Intercept)",
+  "STI", "Spatial use", "Generation time", "Resource specialisation",
+  "STI × Spatial use", "STI × Generation time", "STI × Resource specialisation",
+  "HabitatGeneralist", "HabitatOpen",
+  "Proportion of SNH", "Aggregation of SNH", "Proportion × Aggregation of SNH",
+  "Spatial use × Proportion of SNH", "Spatial use × Aggregation of SNH",
+  "Spatial use × Proportion ×\nAggregation of SNH",
+  "STI × Proportion of SNH", "STI × Aggregation of SNH",
+  "STI × Proportion ×\nAggregation of SNH",
+  "Longitude", "Latitude", "Longitude × Latitude"
+))
+
+
+res <- res %>%
+  arrange(Variables, Scale, Process) %>%
+  mutate(Group = rep(c(
+    rep("Various", 1),
+    rep("Traits", 7),
+    rep("Various", 2),
+    rep("Fragmentation", 3),
+    rep("Fragmentation × traits", 6),
+    rep("Various", 3)
+  ), each = 14))
+
+res$Group <- factor(res$Group, levels = c("Various", "Traits", "Fragmentation", "Fragmentation × traits"))
+
+### plot ###
+
+ggplot(
+  res %>% dplyr::filter(
+    grepl("STI|Spatial use|Generation time|Resource specialisation|Proportion|Aggregation", Variables)
+  ) %>%
+    mutate(Variables = factor(Variables, levels = rev(levels(Variables)))),
+  aes(x = Variables, y = estimate, color = Scale)
+) +
+  geom_hline(yintercept = 0, lty = 2, color = "black") +
+  geom_point(position = position_dodge(.8)) + facet_grid(Group ~ Process, scales = "free", space = "fixed", switch = "y") +
+  geom_errorbar(aes(ymin = lwr, ymax = upr), width = 0, position = position_dodge(.8)) +
+  coord_flip() +
+  scale_y_continuous("Coefficients +/- 95% CI") +
+  scale_x_discrete("") +
+  scale_color_manual(values = colorRampPalette(c("black", "grey"))(7)) +
+  theme_classic() +
+  guides(color = guide_legend(reverse = TRUE)) +
+  theme(strip.background = element_rect(colour=NA, fill=NA), 
+        strip.placement = "outside",
+        axis.text = element_text(color = "black"),
+        strip.text.x = element_text(size = 11, face = "bold"),
+        panel.border = element_blank()
+  )
+
+
+###############################
+### drivers of colonisation ###
+###     and extinction at   ###
+###      20km scale         ###
+###############################
+
+
+### extract data at scale = 20km ###
+dat <- sp_site_occTrend(left_join(dat.occ.trend, unique(sites[, c("Site", "gridCell50")])), .2, .8)
+dat <- left_join(dat, sp) %>% left_join(sites)
+dat <- stdize(dat, prefix = F, omit.cols = c("Trend", "Scale", "pred.then", "pred.now", "nYear"))
+
+dat.Col <- dat %>%
+  mutate(Colonisation = ifelse(Trend == "Colonisation", 1, ifelse(Trend == "No colonisation", 0, NA))) %>%
+  dplyr::filter(Scale == 20000) %>%
+  dplyr::select(-nYear)
+dat.Col$Habitat <- as.factor(dat.Col$Habitat)
+dat.Ext <- dat %>%
+  mutate(Extinction = ifelse(Trend == "Extinction", 1, ifelse(Trend == "Persistence", 0, NA))) %>%
+  dplyr::filter(Scale == 20000) %>%
+  dplyr::select(-nYear)
+dat.Ext$Habitat <- as.factor(dat.Ext$Habitat)
+
+scaleList <- list(
+  scale = attr(dat, "scaled:scale"),
+  center = attr(dat, "scaled:center")
+)
+
+
+##################
+## colonisation ##
+##################
+library(DHARMa)
+
+m.col <- glmer(Colonisation ~ STI_rel * PC3 +
+                 STI_rel * PC4 +
+                 STI_rel * PC1 +
+                 PC1 * PLAND * CLUMPY +
+                 STI_rel * PLAND * CLUMPY +
+                 Habitat + X * Y +
+                 (1 | gridCell50 / Site) + (1 | Species),
+               family = binomial,
+               data = dat.Col,
+               nAGQ = 0, control = glmerControl(
+                 optimizer = "nloptwrap",
+                 optCtrl = list(maxfun = 1e10),
+                 calc.derivs = FALSE
+               ), verbose = F
+)
+summary(m.col)
+
+testDispersion(simulateResiduals(m.col))
+
+##################
+### Extinction ###
+##################
+m.ext <- glmer(Extinction ~ STI_rel * PC3 +
+                 STI_rel * PC4 +
+                 STI_rel * PC1 +
+                 PC1 * PLAND * CLUMPY +
+                 STI_rel * PLAND * CLUMPY +
+                 Habitat + X * Y +
+                 (1 | gridCell50 / Site) + (1 | Species),
+               family = binomial,
+               data = dat.Ext,
+               nAGQ = 0, control = glmerControl(
+                 optimizer = "nloptwrap",
+                 optCtrl = list(maxfun = 1e10),
+                 calc.derivs = FALSE
+               ), verbose = F
+)
+summary(m.ext)
